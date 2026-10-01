@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Ignore all content inside data/ but allow subdirectories and .gitkeep files
+data/**/*
+!data/**/
+!data/**/.gitkeep
