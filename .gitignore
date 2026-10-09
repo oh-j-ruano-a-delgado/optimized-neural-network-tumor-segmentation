@@ -221,3 +221,9 @@ __marimo__/
 data/**/*
 !data/**/
 !data/**/.gitkeep
+
+
+# Documents to help AI agent
+agents.md
+bases-proyecto-optimizacionyheuristica.md
+project_guidelines.md
