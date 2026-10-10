@@ -1,26 +1,31 @@
 """Train a U-Net baseline on the Figshare brain tumor dataset.
 
 Usage (from the project root):
-    python -m scripts.train_baseline --epochs 40 [--output-dir runs/baseline] [--limit-batches N]
+    python -m scripts.train_baseline --epochs 40 [--device auto|cpu|cuda] [--amp] [--output-dir runs/baseline]
 """
 
 import argparse
 import csv
-import random
 import time
 from pathlib import Path
-from typing import Dict, Final, List, Optional, Sequence, Tuple
+from typing import Dict, Final, List, Sequence
 
-import numpy as np
 import torch
-from torch import nn
-from torch.utils.data import DataLoader
 
 from src.dataset.constants import NUM_CLASSES, TUMOR_CLASS_NAMES
-from src.dataset.dataloader import SegmentationBatch, get_dataloaders
+from src.dataset.dataloader import get_dataloaders
 from src.models.losses import DiceFocalLoss
 from src.models.unet import UNet, count_parameters
 from src.utils.metrics import SegmentationMetrics, SegmentationReport
+from src.utils.training import (
+    build_grad_scaler,
+    evaluate_epoch,
+    resolve_amp_mode,
+    resolve_device,
+    resolve_max_batches,
+    set_global_seed,
+    train_epoch,
+)
 
 DEFAULT_EPOCHS: Final[int] = 40
 DEFAULT_BATCH_SIZE: Final[int] = 8
@@ -51,72 +56,9 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--limit-batches", type=int, default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument("--amp", action="store_true")
     return parser.parse_args()
-
-
-def set_global_seed(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-
-
-def resolve_device() -> torch.device:
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-def resolve_max_batches(loader: DataLoader[SegmentationBatch], limit: Optional[int]) -> int:
-    return len(loader) if limit is None else min(limit, len(loader))
-
-
-def train_epoch(
-    model: nn.Module,
-    loader: DataLoader[SegmentationBatch],
-    criterion: nn.Module,
-    optimizer: torch.optim.Optimizer,
-    device: torch.device,
-    max_batches: int,
-) -> float:
-    model.train()
-    total_loss = 0.0
-    total_samples = 0
-    for batch_index, (images, masks) in enumerate(loader):
-        if batch_index >= max_batches:
-            break
-        images = images.to(device)
-        masks = masks.to(device)
-        optimizer.zero_grad(set_to_none=True)
-        logits = model(images)
-        loss = criterion(logits, masks)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item() * images.shape[0]
-        total_samples += images.shape[0]
-    return total_loss / max(total_samples, 1)
-
-
-def evaluate_epoch(
-    model: nn.Module,
-    loader: DataLoader[SegmentationBatch],
-    criterion: nn.Module,
-    metrics: SegmentationMetrics,
-    device: torch.device,
-    max_batches: int,
-) -> Tuple[float, SegmentationReport]:
-    model.eval()
-    metrics.reset()
-    total_loss = 0.0
-    total_samples = 0
-    with torch.no_grad():
-        for batch_index, (images, masks) in enumerate(loader):
-            if batch_index >= max_batches:
-                break
-            images = images.to(device)
-            masks = masks.to(device)
-            logits = model(images)
-            total_loss += criterion(logits, masks).item() * images.shape[0]
-            total_samples += images.shape[0]
-            metrics.update(logits, masks)
-    return total_loss / max(total_samples, 1), metrics.compute()
 
 
 def build_history_fieldnames(class_names: Sequence[str]) -> List[str]:
@@ -199,7 +141,9 @@ def describe_history_row(row: Dict[str, object], total_epochs: int) -> str:
 def main() -> None:
     arguments = parse_arguments()
     set_global_seed(arguments.seed)
-    device = resolve_device()
+    device = resolve_device(arguments.device)
+    amp_enabled = resolve_amp_mode(arguments.amp, device)
+    scaler = build_grad_scaler(amp_enabled)
     output_dir: Path = arguments.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -211,7 +155,8 @@ def main() -> None:
         seed=arguments.seed,
     )
     print(
-        f"Device: {device} | train {len(dataloaders.train.dataset)} samples | "
+        f"Device: {device} | AMP: {'on' if amp_enabled else 'off'} | "
+        f"train {len(dataloaders.train.dataset)} samples | "
         f"validation {len(dataloaders.validation.dataset)} samples | "
         f"test {len(dataloaders.test.dataset)} samples"
     )
@@ -247,6 +192,8 @@ def main() -> None:
             dataloaders.train,
             criterion,
             optimizer,
+            scaler,
+            amp_enabled,
             device,
             resolve_max_batches(dataloaders.train, arguments.limit_batches),
         )
@@ -255,6 +202,7 @@ def main() -> None:
             dataloaders.validation,
             criterion,
             metrics,
+            amp_enabled,
             device,
             resolve_max_batches(dataloaders.validation, arguments.limit_batches),
         )
@@ -273,4 +221,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ValueError as error:
+        raise SystemExit(f"Error: {error}")
