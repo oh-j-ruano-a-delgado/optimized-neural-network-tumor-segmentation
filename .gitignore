@@ -227,3 +227,6 @@ data/**/*
 agents.md
 bases-proyecto-optimizacionyheuristica.md
 project_guidelines.md
+
+# Training artifacts (checkpoints and experiment logs)
+runs/
