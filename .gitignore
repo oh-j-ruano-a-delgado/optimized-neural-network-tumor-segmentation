@@ -217,6 +217,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# Kaggle API credentials
+kaggle.json
+
 # Ignore all content inside data/ but allow subdirectories and .gitkeep files
 data/**/*
 !data/**/
