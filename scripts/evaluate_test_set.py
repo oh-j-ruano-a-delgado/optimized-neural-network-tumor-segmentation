@@ -1,0 +1,317 @@
+"""Evaluate the baseline and GA-optimized U-Net checkpoints on the held-out Testing split.
+
+Neither model saw the Testing split during training, checkpoint selection or the genetic
+search, so this is the unbiased comparison for Phase 4. Each checkpoint is rebuilt from its own
+stored architecture and preprocessed with the deterministic evaluation transform at the image
+size it was trained with. Dice and IoU are accumulated over every test pixel (the same global
+aggregation used for validation) and reported per tumor class, as their macro mean over the
+three classes (the validation metric), and for the whole tumor, where every tumor class is
+merged into one foreground label so localization quality can be told apart from tumor-type
+confusion.
+
+Outputs (in ``--output-dir``):
+    test_metrics.csv   tidy table (model, region, dice, iou) consumed by scripts/plot_results.py
+    test_metrics.json  the same scores plus checkpoint metadata and test-set composition
+
+Usage (from the project root):
+    python -m scripts.evaluate_test_set [--baseline-checkpoint runs/baseline/best_model.pth]
+        [--optimized-checkpoint runs/optimized/best_model.pth] [--device auto|cpu|cuda] [--amp]
+        [--batch-size 8] [--output-dir runs/comparison]
+"""
+
+import argparse
+import csv
+import json
+import math
+import time
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Final, List, Mapping, Optional, Sequence, Tuple
+
+import torch
+from torch import Tensor, nn
+from torch.utils.data import DataLoader
+
+from src.dataset.constants import (
+    BACKGROUND_LABEL,
+    NUM_CLASSES,
+    RAW_DATA_DIR,
+    TESTING_SPLIT,
+    TUMOR_CLASS_NAMES,
+)
+from src.dataset.dataloader import (
+    BrainTumorSegmentationDataset,
+    SegmentationBatch,
+    SegmentationSample,
+    build_dataloader,
+    discover_samples,
+)
+from src.dataset.transforms import build_evaluation_transform
+from src.utils.checkpoint import (
+    TrainingCheckpoint,
+    build_model_from_checkpoint,
+    load_training_checkpoint,
+)
+from src.utils.metrics import SegmentationMetrics, SegmentationReport
+from src.utils.training import resolve_amp_mode, resolve_device, transfer_batch
+
+DEFAULT_BASELINE_CHECKPOINT: Final[Path] = Path("runs/baseline/best_model.pth")
+DEFAULT_OPTIMIZED_CHECKPOINT: Final[Path] = Path("runs/optimized/best_model.pth")
+DEFAULT_OUTPUT_DIR: Final[Path] = Path("runs/comparison")
+DEFAULT_BATCH_SIZE: Final[int] = 8
+DEFAULT_SEED: Final[int] = 42
+METRICS_CSV_FILENAME: Final[str] = "test_metrics.csv"
+METRICS_JSON_FILENAME: Final[str] = "test_metrics.json"
+MEAN_REGION: Final[str] = "mean"
+WHOLE_TUMOR_REGION: Final[str] = "whole_tumor"
+WHOLE_TUMOR_CLASSES: Final[int] = 2
+CSV_FIELDNAMES: Final[Tuple[str, ...]] = ("model", "region", "dice", "iou")
+REFERENCE_MODEL: Final[str] = "baseline"
+CHALLENGER_MODEL: Final[str] = "optimized"
+
+
+@dataclass(frozen=True)
+class RegionScore:
+    region: str
+    dice: float
+    iou: float
+
+
+@dataclass(frozen=True)
+class ModelEvaluation:
+    name: str
+    checkpoint: TrainingCheckpoint
+    scores: Tuple[RegionScore, ...]
+    evaluation_seconds: float
+
+    def score_for(self, region: str) -> RegionScore:
+        return next(score for score in self.scores if score.region == region)
+
+
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--baseline-checkpoint", type=Path, default=DEFAULT_BASELINE_CHECKPOINT)
+    parser.add_argument("--optimized-checkpoint", type=Path, default=DEFAULT_OPTIMIZED_CHECKPOINT)
+    parser.add_argument("--data-dir", type=Path, default=RAW_DATA_DIR)
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument("--amp", action="store_true")
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    return parser.parse_args()
+
+
+def build_test_loader(
+    samples: Sequence[SegmentationSample],
+    image_size: int,
+    batch_size: int,
+    num_workers: int,
+    seed: int,
+) -> DataLoader[SegmentationBatch]:
+    dataset = BrainTumorSegmentationDataset(
+        samples, build_evaluation_transform((image_size, image_size))
+    )
+    return build_dataloader(
+        dataset, batch_size, is_training=False, num_workers=num_workers, seed=seed
+    )
+
+
+def to_whole_tumor_labels(class_indices: Tensor) -> Tensor:
+    return (class_indices != BACKGROUND_LABEL).long()
+
+
+def accumulate_test_metrics(
+    model: nn.Module,
+    loader: DataLoader[SegmentationBatch],
+    device: torch.device,
+    amp_enabled: bool,
+) -> Tuple[SegmentationReport, SegmentationReport]:
+    class_metrics = SegmentationMetrics(num_classes=NUM_CLASSES)
+    whole_tumor_metrics = SegmentationMetrics(num_classes=WHOLE_TUMOR_CLASSES)
+    model.eval()
+    with torch.inference_mode():
+        for images, masks in loader:
+            images, masks = transfer_batch(images, masks, device)
+            with torch.autocast(device_type=device.type, enabled=amp_enabled):
+                predictions = model(images).argmax(dim=1)
+            class_metrics.update(predictions, masks)
+            whole_tumor_metrics.update(
+                to_whole_tumor_labels(predictions), to_whole_tumor_labels(masks)
+            )
+    return class_metrics.compute(), whole_tumor_metrics.compute()
+
+
+def build_region_scores(
+    class_report: SegmentationReport, whole_tumor_report: SegmentationReport
+) -> Tuple[RegionScore, ...]:
+    class_scores = [
+        RegionScore(TUMOR_CLASS_NAMES[class_index], float(dice), float(iou))
+        for class_index, dice, iou in zip(
+            class_report.class_indices,
+            class_report.dice_by_class.tolist(),
+            class_report.iou_by_class.tolist(),
+        )
+    ]
+    return (
+        *class_scores,
+        RegionScore(MEAN_REGION, class_report.mean_dice, class_report.mean_iou),
+        RegionScore(
+            WHOLE_TUMOR_REGION,
+            float(whole_tumor_report.dice_by_class[0]),
+            float(whole_tumor_report.iou_by_class[0]),
+        ),
+    )
+
+
+def evaluate_checkpoint(
+    name: str,
+    checkpoint_path: Path,
+    samples: Sequence[SegmentationSample],
+    arguments: argparse.Namespace,
+    device: torch.device,
+    amp_enabled: bool,
+) -> ModelEvaluation:
+    checkpoint = load_training_checkpoint(checkpoint_path)
+    model = build_model_from_checkpoint(checkpoint, device)
+    loader = build_test_loader(
+        samples, checkpoint.image_size, arguments.batch_size, arguments.num_workers, arguments.seed
+    )
+    start_time = time.perf_counter()
+    class_report, whole_tumor_report = accumulate_test_metrics(model, loader, device, amp_enabled)
+    return ModelEvaluation(
+        name=name,
+        checkpoint=checkpoint,
+        scores=build_region_scores(class_report, whole_tumor_report),
+        evaluation_seconds=time.perf_counter() - start_time,
+    )
+
+
+def finite_or_none(value: float) -> Optional[float]:
+    return round(value, 6) if math.isfinite(value) else None
+
+
+def count_samples_per_class(samples: Sequence[SegmentationSample]) -> Dict[str, int]:
+    counts = Counter(sample.class_label for sample in samples)
+    return {TUMOR_CLASS_NAMES[label]: counts[label] for label in sorted(TUMOR_CLASS_NAMES)}
+
+
+def write_metrics_csv(path: Path, evaluations: Sequence[ModelEvaluation]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(
+            {
+                "model": evaluation.name,
+                "region": score.region,
+                "dice": finite_or_none(score.dice),
+                "iou": finite_or_none(score.iou),
+            }
+            for evaluation in evaluations
+            for score in evaluation.scores
+        )
+
+
+def serialize_evaluation(evaluation: ModelEvaluation) -> Dict[str, Any]:
+    checkpoint = evaluation.checkpoint
+    return {
+        "checkpoint": checkpoint.path.as_posix(),
+        "best_epoch": checkpoint.epoch,
+        "validation_dice": finite_or_none(checkpoint.validation_dice),
+        "hyperparameters": checkpoint.hyperparameters,
+        "image_size": checkpoint.image_size,
+        "test": {
+            score.region: {"dice": finite_or_none(score.dice), "iou": finite_or_none(score.iou)}
+            for score in evaluation.scores
+        },
+    }
+
+
+def write_metrics_json(
+    path: Path,
+    evaluations: Sequence[ModelEvaluation],
+    samples_per_class: Mapping[str, int],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "test_samples": sum(samples_per_class.values()),
+        "test_samples_per_class": dict(samples_per_class),
+        "models": {evaluation.name: serialize_evaluation(evaluation) for evaluation in evaluations},
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def format_comparison_table(reference: ModelEvaluation, challenger: ModelEvaluation) -> List[str]:
+    header = (
+        f"{'Region':<13}{'Dice ' + reference.name:>17}{'Dice ' + challenger.name:>17}"
+        f"{'Delta':>9}{'IoU ' + reference.name:>17}{'IoU ' + challenger.name:>17}{'Delta':>9}"
+    )
+    lines = [header, "-" * len(header)]
+    for reference_score in reference.scores:
+        challenger_score = challenger.score_for(reference_score.region)
+        lines.append(
+            f"{reference_score.region:<13}"
+            f"{reference_score.dice:>17.4f}{challenger_score.dice:>17.4f}"
+            f"{challenger_score.dice - reference_score.dice:>+9.4f}"
+            f"{reference_score.iou:>17.4f}{challenger_score.iou:>17.4f}"
+            f"{challenger_score.iou - reference_score.iou:>+9.4f}"
+        )
+    return lines
+
+
+def describe_checkpoint(evaluation: ModelEvaluation) -> str:
+    checkpoint = evaluation.checkpoint
+    hyperparameters = checkpoint.hyperparameters
+    return (
+        f"{evaluation.name:<10} | epoch {checkpoint.epoch:>3} | "
+        f"validation Dice {checkpoint.validation_dice:.4f} | "
+        f"lr {hyperparameters.get('learning_rate', float('nan')):.3g} | "
+        f"wd {hyperparameters.get('weight_decay', float('nan')):.3g} | "
+        f"filters {checkpoint.model_config['base_filters']} | "
+        f"depth {checkpoint.model_config['depth']} | "
+        f"evaluated in {evaluation.evaluation_seconds:.1f}s"
+    )
+
+
+def main() -> None:
+    arguments = parse_arguments()
+    device = resolve_device(arguments.device)
+    amp_enabled = resolve_amp_mode(arguments.amp, device)
+    samples = discover_samples(arguments.data_dir / TESTING_SPLIT)
+    samples_per_class = count_samples_per_class(samples)
+    print(
+        f"Device: {device} | AMP: {'on' if amp_enabled else 'off'} | "
+        f"test set {len(samples)} slices ("
+        + ", ".join(f"{name} {count}" for name, count in samples_per_class.items())
+        + ")"
+    )
+
+    evaluations = [
+        evaluate_checkpoint(name, checkpoint_path, samples, arguments, device, amp_enabled)
+        for name, checkpoint_path in (
+            (REFERENCE_MODEL, arguments.baseline_checkpoint),
+            (CHALLENGER_MODEL, arguments.optimized_checkpoint),
+        )
+    ]
+    for evaluation in evaluations:
+        print(describe_checkpoint(evaluation))
+
+    reference, challenger = evaluations
+    print()
+    print("\n".join(format_comparison_table(reference, challenger)))
+
+    output_dir: Path = arguments.output_dir
+    csv_path = output_dir / METRICS_CSV_FILENAME
+    json_path = output_dir / METRICS_JSON_FILENAME
+    write_metrics_csv(csv_path, evaluations)
+    write_metrics_json(json_path, evaluations, samples_per_class)
+    print(f"\nTest metrics saved to '{csv_path}' and '{json_path}'.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (ValueError, FileNotFoundError) as error:
+        raise SystemExit(f"Error: {error}")
