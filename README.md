@@ -51,6 +51,37 @@ python -m scripts.train_baseline --epochs 2 --limit-batches 20       # quick smo
 
 Artifacts are written to `runs/baseline/` (`history.csv` and `best_model.pth`).
 
+## Interface (Streamlit)
+
+An interactive, bilingual (English/Spanish) demo that guides visitors through three
+steps: choose a slice, look at the four views (preprocessed input, per-class overlay,
+predicted mask and per-pixel confidence map) and read a plain-language interpretation
+with the detected tumor type, its share of the slice and how confident the model is.
+Nine slices from the held-out Testing split ship with the repository under
+`app/samples/`, so the app can be tried without uploading anything, while any PNG in
+the same domain can also be uploaded. Technical controls (checkpoint selection, overlay
+opacity, confidence threshold) live in a collapsed "Advanced settings" section.
+
+```bash
+pip install -r requirements.txt
+streamlit run app/main.py
+```
+
+The app loads `app/models/baseline_unet.pth`. Once the genetic search produces its best
+checkpoint, copy it into the app and the selector will offer it too:
+
+```bash
+cp runs/optimized/best_model.pth app/models/optimized_unet.pth
+```
+
+### Deploy on Streamlit Community Cloud
+
+1. Push the repository to GitHub and make it public (or grant Streamlit access to it).
+2. Sign in at <https://share.streamlit.io> with GitHub and click **New app**.
+3. Select the repository and the branch that contains the interface (or `develop` once
+   it is merged), set the main file to `app/main.py` and deploy. Streamlit installs
+   `requirements.txt` automatically; no secrets are required.
+
 ## Cloud training (Kaggle / Colab)
 
 Both platforms ship PyTorch with CUDA preinstalled, so install only the remaining
