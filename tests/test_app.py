@@ -232,10 +232,11 @@ def test_to_display_image_converts_grayscale_to_rgb(grayscale_slice) -> None:
     assert np.array_equal(display[:, :, 0], grayscale_slice)
 
 
-def test_bundled_baseline_checkpoint_is_loadable() -> None:
-    baseline_path = MODEL_CHECKPOINTS["baseline"]
-    assert baseline_path.is_file()
-    model = load_model_from_checkpoint("baseline", baseline_path, device=torch.device("cpu"))
+@pytest.mark.parametrize("model_key", sorted(MODEL_CHECKPOINTS))
+def test_bundled_checkpoints_are_loadable(model_key: str) -> None:
+    checkpoint = MODEL_CHECKPOINTS[model_key]
+    assert checkpoint.is_file()
+    model = load_model_from_checkpoint(model_key, checkpoint, device=torch.device("cpu"))
     image = np.random.default_rng(1).integers(0, 256, size=(64, 64), dtype=np.uint8)
     result = predict(model, preprocess_image(image, model).tensor)
     assert result.mask.shape == (256, 256)
