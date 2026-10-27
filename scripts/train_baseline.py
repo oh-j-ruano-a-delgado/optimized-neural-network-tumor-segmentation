@@ -9,10 +9,16 @@ focal_tversky_focal, dice_ce). ``--region-weight`` weights the Dice or Focal Tve
 0.5 / 0.5, focal gamma 2) reproduce the Phase 2-4 setup, and every argument is stored in the
 checkpoint, so each run records which pipeline and loss produced it.
 
+``--early-stopping-patience N`` stops training once the mean validation Dice has not improved for
+N consecutive epochs; the checkpoint always holds the best epoch, so ``--epochs`` becomes an upper
+bound. It is disabled by default, which keeps the fixed-length runs of earlier phases reproducible.
+
 Usage (from the project root):
     python -m scripts.train_baseline --epochs 40 [--device auto|cpu|cuda] [--amp] [--output-dir runs/baseline]
-        [--augmentation none|basic|advanced] [--loss dice_focal|focal_tversky_focal|dice_ce]
+        [--augmentation none|basic|advanced_spatial|advanced_intensity|advanced]
+        [--loss dice_focal|focal_tversky_focal|dice_ce]
         [--tversky-alpha 0.7] [--tversky-beta 0.3] [--tversky-gamma 1.3333]
+        [--early-stopping-patience 20]
 """
 
 import argparse
@@ -47,7 +53,9 @@ from src.utils.training import (
     resolve_device,
     resolve_max_batches,
     set_global_seed,
+    should_stop_early,
     train_epoch,
+    validate_early_stopping_patience,
 )
 
 DEFAULT_EPOCHS: Final[int] = 40
@@ -97,6 +105,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--limit-batches", type=int, default=None)
+    parser.add_argument("--early-stopping-patience", type=int, default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--amp", action="store_true")
@@ -194,6 +203,7 @@ def describe_history_row(row: Dict[str, object], total_epochs: int) -> str:
 
 def main() -> None:
     arguments = parse_arguments()
+    validate_early_stopping_patience(arguments.early_stopping_patience)
     set_global_seed(arguments.seed)
     device = resolve_device(arguments.device)
     amp_enabled = resolve_amp_mode(arguments.amp, device)
@@ -234,6 +244,7 @@ def main() -> None:
     fieldnames = build_history_fieldnames(class_names)
     history: List[Dict[str, object]] = []
     best_dice = -1.0
+    best_epoch = 0
     checkpoint_path = output_dir / "best_model.pth"
 
     for epoch in range(1, arguments.epochs + 1):
@@ -266,9 +277,20 @@ def main() -> None:
 
         if report.mean_dice > best_dice:
             best_dice = report.mean_dice
+            best_epoch = epoch
             save_checkpoint(checkpoint_path, model, arguments, epoch, best_dice)
 
-    print(f"Best validation Dice: {best_dice:.4f} | checkpoint saved to '{checkpoint_path}'.")
+        if should_stop_early(epoch, best_epoch, arguments.early_stopping_patience):
+            print(
+                f"Early stopping at epoch {epoch}: no improvement in mean validation Dice for "
+                f"{arguments.early_stopping_patience} epochs."
+            )
+            break
+
+    print(
+        f"Best validation Dice: {best_dice:.4f} (epoch {best_epoch}) | "
+        f"checkpoint saved to '{checkpoint_path}'."
+    )
 
 
 if __name__ == "__main__":

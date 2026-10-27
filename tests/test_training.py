@@ -1,3 +1,11 @@
+"""Tests for the shared training-loop utilities in ``src.utils.training``.
+
+The epoch tests train a real U-Net on a tiny random dataset (4 images of 32 x 32) to check that a
+training pass lowers the loss and an evaluation pass yields finite metrics. The early-stopping
+tests pin down the patience semantics: with patience N, training stops at the first epoch that is
+N epochs after the best one, never earlier, and a missing patience disables early stopping.
+"""
+
 import math
 
 import pytest
@@ -13,7 +21,9 @@ from src.utils.training import (
     resolve_amp_mode,
     resolve_device,
     set_global_seed,
+    should_stop_early,
     train_epoch,
+    validate_early_stopping_patience,
 )
 
 
@@ -101,3 +111,24 @@ def test_train_epoch_reduces_loss_when_overfitting() -> None:
         for _ in range(30)
     ]
     assert losses[-1] < losses[0]
+
+
+def test_early_stopping_waits_for_the_full_patience() -> None:
+    assert not should_stop_early(current_epoch=116, best_epoch=97, patience=20)
+    assert should_stop_early(current_epoch=117, best_epoch=97, patience=20)
+
+
+def test_early_stopping_never_triggers_on_the_best_epoch() -> None:
+    assert not should_stop_early(current_epoch=50, best_epoch=50, patience=1)
+
+
+def test_early_stopping_is_disabled_without_patience() -> None:
+    assert not should_stop_early(current_epoch=500, best_epoch=1, patience=None)
+
+
+@pytest.mark.parametrize("patience", [0, -3])
+def test_early_stopping_rejects_non_positive_patience(patience: int) -> None:
+    with pytest.raises(ValueError, match="patience"):
+        validate_early_stopping_patience(patience)
+    with pytest.raises(ValueError, match="patience"):
+        should_stop_early(current_epoch=10, best_epoch=1, patience=patience)

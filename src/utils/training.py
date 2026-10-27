@@ -1,3 +1,15 @@
+"""Shared training-loop utilities: seeding, device and AMP setup, epochs and early stopping.
+
+``train_epoch`` and ``evaluate_epoch`` run one pass over a DataLoader, optionally under CUDA
+automatic mixed precision. The loss is always computed on logits cast to float32, because the
+small smoothing epsilon of the Dice and Tversky losses would underflow in half precision.
+
+Early stopping monitors the same quantity that selects the checkpoint (mean validation Dice over
+the tumor classes): ``should_stop_early`` returns True once ``patience`` epochs have passed since
+the best epoch, so the saved checkpoint is always the best one seen and training never continues
+for more than ``patience`` epochs without a new best. A patience of None disables it.
+"""
+
 import random
 from typing import Optional, Tuple
 
@@ -39,6 +51,16 @@ def build_grad_scaler(amp_enabled: bool) -> torch.amp.GradScaler:
     return torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
 
+def validate_early_stopping_patience(patience: Optional[int]) -> None:
+    if patience is not None and patience < 1:
+        raise ValueError(f"Early stopping patience must be at least 1, got {patience}.")
+
+
+def should_stop_early(current_epoch: int, best_epoch: int, patience: Optional[int]) -> bool:
+    validate_early_stopping_patience(patience)
+    return patience is not None and current_epoch - best_epoch >= patience
+
+
 def resolve_max_batches(loader: DataLoader[SegmentationBatch], limit: Optional[int]) -> int:
     return len(loader) if limit is None else min(limit, len(loader))
 
@@ -72,8 +94,6 @@ def train_epoch(
         optimizer.zero_grad(set_to_none=True)
         with torch.autocast(device_type=device.type, enabled=amp_enabled):
             logits = model(images)
-            # The loss is forced to float32 because the small smoothing epsilon
-            # of the Dice loss would underflow in half precision.
             loss = criterion(logits.float(), masks)
         scaler.scale(loss).backward()
         scaler.step(optimizer)

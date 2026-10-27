@@ -56,8 +56,13 @@ Phase 5 options (defaults reproduce the Phase 2-4 setup):
 ```bash
 python -m scripts.train_baseline --augmentation advanced --loss focal_tversky_focal   # Focal Tversky (alpha 0.7, beta 0.3, gamma 4/3) + Focal
 python -m scripts.train_baseline --loss dice_ce                                        # Dice + cross-entropy control
+python -m scripts.train_baseline --augmentation advanced_spatial --loss focal_tversky_focal --epochs 200 --early-stopping-patience 20
 python -m scripts.evaluate_diagnostics --checkpoint runs/optimized/best_model.pth     # per-class precision/recall and confusion matrices on the validation split
 ```
+
+Augmentation presets form a 2 x 2 design: `basic` (basic spatial), `advanced_spatial` (advanced
+spatial only), `advanced_intensity` (basic spatial + intensity) and `advanced` (both). With
+`--early-stopping-patience N`, training stops after N epochs without a new best validation Dice.
 
 ## Cloud training (Kaggle / Colab)
 
