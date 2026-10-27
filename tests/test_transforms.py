@@ -4,6 +4,8 @@ The synthetic slice is a uint16 image (Figshare PNGs are 16-bit) with a bright e
 on a black background and a rectangular tumor of class 2. Reproducibility is checked through
 Torch's global generator because the augmentation pipeline reseeds itself from it on every call,
 and the pickling test mimics how each DataLoader worker receives its own copy of the transform.
+The two isolation presets are checked field by field against "basic" and "advanced" so each one
+differs from them in exactly one block (spatial or intensity), as the 2 x 2 design requires.
 """
 
 import pickle
@@ -17,6 +19,8 @@ import torch
 
 from src.dataset.transforms import (
     ADVANCED_AUGMENTATION,
+    ADVANCED_INTENSITY_AUGMENTATION,
+    ADVANCED_SPATIAL_AUGMENTATION,
     AUGMENTATION_PRESETS,
     BASIC_AUGMENTATION,
     SegmentationTransform,
@@ -80,7 +84,7 @@ def test_evaluation_transform_does_not_consume_torch_random_state() -> None:
     assert torch.equal(torch.rand(1), expected_next_draw)
 
 
-@pytest.mark.parametrize("preset", ("basic", "advanced"))
+@pytest.mark.parametrize("preset", ("basic", "advanced_spatial", "advanced_intensity", "advanced"))
 def test_augmentation_is_reproducible_with_the_same_torch_seed(preset: str) -> None:
     transform = build_training_transform(IMAGE_SIZE, augmentation=preset)
     first_image, first_mask = apply_with_seed(transform, 11)
@@ -89,7 +93,7 @@ def test_augmentation_is_reproducible_with_the_same_torch_seed(preset: str) -> N
     assert torch.equal(first_mask, second_mask)
 
 
-@pytest.mark.parametrize("preset", ("basic", "advanced"))
+@pytest.mark.parametrize("preset", ("basic", "advanced_spatial", "advanced_intensity", "advanced"))
 def test_augmentation_changes_with_the_torch_seed(preset: str) -> None:
     transform = build_training_transform(IMAGE_SIZE, augmentation=preset)
     outputs = [apply_with_seed(transform, seed)[0] for seed in range(6)]
@@ -158,15 +162,72 @@ def test_presets_select_the_documented_transforms() -> None:
     ]
 
 
-def test_intensity_augmentation_rejects_z_score_normalization() -> None:
+@pytest.mark.parametrize("preset", ("advanced_intensity", "advanced"))
+def test_intensity_augmentation_rejects_z_score_normalization(preset: str) -> None:
     with pytest.raises(ValueError, match="minmax"):
-        build_training_transform(IMAGE_SIZE, normalization="zscore", augmentation="advanced")
+        build_training_transform(IMAGE_SIZE, normalization="zscore", augmentation=preset)
 
 
-def test_basic_augmentation_allows_z_score_normalization() -> None:
-    transform = build_training_transform(IMAGE_SIZE, normalization="zscore", augmentation="basic")
+@pytest.mark.parametrize("preset", ("basic", "advanced_spatial"))
+def test_spatial_only_augmentation_allows_z_score_normalization(preset: str) -> None:
+    transform = build_training_transform(IMAGE_SIZE, normalization="zscore", augmentation=preset)
     image, _ = apply_with_seed(transform, 0)
     assert torch.isfinite(image).all()
+
+
+def spatial_settings(config: object) -> dict:
+    return {
+        name: value
+        for name, value in config.__dict__.items()
+        if not name.startswith(("brightness", "contrast", "gamma", "noise"))
+    }
+
+
+def intensity_settings(config: object) -> dict:
+    return {
+        name: value
+        for name, value in config.__dict__.items()
+        if name.startswith(("brightness", "contrast", "gamma", "noise"))
+    }
+
+
+def test_isolation_presets_form_a_two_by_two_design() -> None:
+    assert spatial_settings(ADVANCED_SPATIAL_AUGMENTATION) == spatial_settings(
+        ADVANCED_AUGMENTATION
+    )
+    assert intensity_settings(ADVANCED_SPATIAL_AUGMENTATION) == intensity_settings(
+        BASIC_AUGMENTATION
+    )
+    assert spatial_settings(ADVANCED_INTENSITY_AUGMENTATION) == spatial_settings(BASIC_AUGMENTATION)
+    assert intensity_settings(ADVANCED_INTENSITY_AUGMENTATION) == intensity_settings(
+        ADVANCED_AUGMENTATION
+    )
+
+
+def test_isolation_presets_select_the_documented_transforms() -> None:
+    spatial = build_augmentation_pipeline(ADVANCED_SPATIAL_AUGMENTATION)
+    intensity = build_augmentation_pipeline(ADVANCED_INTENSITY_AUGMENTATION)
+    assert [type(item).__name__ for item in spatial.spatial.transforms] == [
+        "HorizontalFlip",
+        "Affine",
+        "OneOf",
+    ]
+    assert not spatial.has_intensity_transforms
+    assert [type(item).__name__ for item in intensity.spatial.transforms] == [
+        "HorizontalFlip",
+        "VerticalFlip",
+        "Affine",
+    ]
+    assert [type(item).__name__ for item in intensity.intensity.transforms] == [
+        "RandomBrightnessContrast",
+        "RandomGamma",
+        "GaussNoise",
+    ]
+
+
+def test_preset_names_resolve_to_their_configs() -> None:
+    assert resolve_augmentation_config("advanced_spatial") is ADVANCED_SPATIAL_AUGMENTATION
+    assert resolve_augmentation_config("advanced_intensity") is ADVANCED_INTENSITY_AUGMENTATION
 
 
 def test_resolve_augmentation_config_accepts_configs_and_none() -> None:

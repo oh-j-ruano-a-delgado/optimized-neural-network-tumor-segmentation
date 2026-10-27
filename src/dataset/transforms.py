@@ -15,17 +15,29 @@ Preprocessing notes:
     Masks are always resized and warped with nearest-neighbour interpolation so every pixel stays
     a valid class id instead of a blend of neighbouring labels.
 
-Augmentation (``albumentations`` 2.0.8, the last MIT-licensed release) is selected by preset:
-    "none"      no augmentation.
-    "basic"     the original Phase 1 policy: horizontal and vertical flips (p = 0.5 each) and a
-                rotation of up to +-15 degrees on every sample.
-    "advanced"  horizontal flip (p = 0.5); affine rotation +-15 degrees, scale 0.9-1.1 and
-                translation +-6% (p = 0.7); one of ElasticTransform(alpha = 200, sigma = 8) or
-                GridDistortion(num_steps = 5, distort_limit = 0.15) (p = 0.3); then, on the
-                normalized image only, RandomBrightnessContrast(+-0.15, p = 0.5),
-                RandomGamma(80-120, p = 0.3) and GaussNoise(std 0.01-0.03, p = 0.2).
-    The vertical flip is dropped from "advanced" because Figshare contains sagittal and coronal
-    slices, and flipping them upside down produces anatomy that never occurs at test time.
+Augmentation (``albumentations`` 2.0.8, the last MIT-licensed release) is built from two blocks:
+    basic spatial     horizontal and vertical flips (p = 0.5 each) and a rotation of up to
+                      +-15 degrees on every sample (the original Phase 1 policy).
+    advanced spatial  horizontal flip (p = 0.5); affine rotation +-15 degrees, scale 0.9-1.1 and
+                      translation +-6% (p = 0.7); one of ElasticTransform(alpha = 200,
+                      sigma = 8) or GridDistortion(num_steps = 5, distort_limit = 0.15) (p = 0.3).
+    intensity         applied to the normalized image only: RandomBrightnessContrast(+-0.15,
+                      p = 0.5), RandomGamma(80-120, p = 0.3) and GaussNoise(std 0.01-0.03,
+                      p = 0.2).
+The presets combine them as a 2 x 2 factorial design (spatial block x intensity on/off):
+    "none"                no augmentation.
+    "basic"               basic spatial, no intensity.
+    "advanced_spatial"    advanced spatial, no intensity.
+    "advanced_intensity"  basic spatial + intensity.
+    "advanced"            advanced spatial + intensity.
+Each of the two isolation presets differs from "basic" or "advanced" in exactly one block, which
+is what attributes an effect (such as the pituitary-to-meningioma confusion seen with
+"advanced") to the spatial or to the intensity transforms. "advanced_intensity" keeps the basic
+flips and rotation on purpose: an intensity-only preset would also remove every geometric
+augmentation, so any change could not be attributed to the intensity transforms alone.
+    The vertical flip is dropped from the advanced spatial block because Figshare contains
+    sagittal and coronal slices, and flipping them upside down produces anatomy that never occurs
+    at test time.
     The deformation strengths were measured on a 256 x 256 grid: the elastic setting displaces
     pixels by about 1.9 px on average (4.4 px at the 99th percentile) and the grid setting by about
     4.7 px (7.9 px), whereas the library default distort_limit of 0.3 moves them about 9 px, which
@@ -46,7 +58,7 @@ Ordering and randomness:
     network request at import time in the main process and again in every spawned worker.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Final, List, Literal, Mapping, Optional, Tuple, Union, get_args
 
@@ -58,7 +70,7 @@ from numpy.typing import NDArray
 from torch import Tensor
 
 NormalizationMode = Literal["minmax", "zscore"]
-AugmentationPreset = Literal["none", "basic", "advanced"]
+AugmentationPreset = Literal["none", "basic", "advanced_spatial", "advanced_intensity", "advanced"]
 ImageSize = Tuple[int, int]
 FloatRange = Tuple[float, float]
 
@@ -142,8 +154,26 @@ ADVANCED_AUGMENTATION: Final[AugmentationConfig] = AugmentationConfig(
     gamma_probability=0.3,
     noise_probability=0.2,
 )
+ADVANCED_SPATIAL_AUGMENTATION: Final[AugmentationConfig] = replace(
+    ADVANCED_AUGMENTATION,
+    brightness_contrast_probability=0.0,
+    gamma_probability=0.0,
+    noise_probability=0.0,
+)
+ADVANCED_INTENSITY_AUGMENTATION: Final[AugmentationConfig] = replace(
+    BASIC_AUGMENTATION,
+    brightness_contrast_probability=ADVANCED_AUGMENTATION.brightness_contrast_probability,
+    gamma_probability=ADVANCED_AUGMENTATION.gamma_probability,
+    noise_probability=ADVANCED_AUGMENTATION.noise_probability,
+)
 AUGMENTATION_CONFIGS: Final[Mapping[str, Optional[AugmentationConfig]]] = MappingProxyType(
-    {"none": None, "basic": BASIC_AUGMENTATION, "advanced": ADVANCED_AUGMENTATION}
+    {
+        "none": None,
+        "basic": BASIC_AUGMENTATION,
+        "advanced_spatial": ADVANCED_SPATIAL_AUGMENTATION,
+        "advanced_intensity": ADVANCED_INTENSITY_AUGMENTATION,
+        "advanced": ADVANCED_AUGMENTATION,
+    }
 )
 
 
