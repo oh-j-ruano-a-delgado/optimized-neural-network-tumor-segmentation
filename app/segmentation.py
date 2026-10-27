@@ -134,15 +134,15 @@ def load_model_from_checkpoint(
     )
 
 
-def read_sample_image(image_path: Path) -> NDArray[np.uint8]:
-    return read_image_file(image_path, cv2.IMREAD_GRAYSCALE)
+def read_sample_image(image_path: Path) -> NDArray[np.generic]:
+    return to_grayscale(read_image_file(image_path, cv2.IMREAD_UNCHANGED))
 
 
-def decode_image_bytes(image_bytes: bytes) -> NDArray[np.uint8]:
-    image = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+def decode_image_bytes(image_bytes: bytes) -> NDArray[np.generic]:
+    image = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
     if image is None:
         raise ValueError("The uploaded file is not a decodable PNG image.")
-    return image
+    return to_grayscale(image)
 
 
 def discover_sample_images(samples_dir: Path = SAMPLES_DIR) -> List[SampleImage]:
@@ -153,7 +153,7 @@ def discover_sample_images(samples_dir: Path = SAMPLES_DIR) -> List[SampleImage]
     ]
 
 
-def preprocess_image(image: NDArray[np.uint8], model: SegmentationModel) -> PreprocessedImage:
+def preprocess_image(image: NDArray[np.generic], model: SegmentationModel) -> PreprocessedImage:
     grayscale = to_grayscale(image)
     # The evaluation transform only reads the mask to widen the crop around the
     # tumor; at inference time the head silhouette alone defines that crop.

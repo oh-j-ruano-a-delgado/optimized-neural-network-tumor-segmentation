@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 import torch
@@ -223,7 +224,26 @@ def test_bundled_samples_cover_every_tumor_class() -> None:
     for sample in samples:
         image = read_sample_image(sample.path)
         assert image.ndim == 2
-        assert image.dtype == np.uint8
+        assert image.dtype in (np.uint8, np.uint16)
+
+
+def test_read_sample_image_preserves_sixteen_bit_depth(tmp_path: Path) -> None:
+    values = np.array([[0, 1200], [2400, 4000]], dtype=np.uint16)
+    path = tmp_path / "sixteen_bit.png"
+    cv2.imwrite(str(path), values)
+
+    loaded = read_sample_image(path)
+
+    assert loaded.dtype == np.uint16
+    assert int(loaded.max()) == 4000
+
+
+def test_bundled_samples_are_not_quantized_to_eight_bits() -> None:
+    sample = discover_sample_images()[0]
+    image = read_sample_image(sample.path)
+
+    assert image.dtype == np.uint16
+    assert int(image.max()) > 255
 
 
 def test_to_display_image_converts_grayscale_to_rgb(grayscale_slice) -> None:

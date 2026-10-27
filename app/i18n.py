@@ -70,7 +70,10 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                     "**Tumor region detected:** about **{area:.1f}%** of the slice, mostly "
                     "**{dominant}**."
                 ),
-                "interpretation_no_tumor": "**No tumor region detected** in this slice.",
+                "interpretation_no_tumor": (
+                    "**No tumor region detected** in this slice. The model is conservative: "
+                    "small tumors can be missed, so this is not proof that the slice is healthy."
+                ),
                 "confidence_summary": (
                     "**Model confidence:** {value:.0%} on average inside the detected "
                     "region — {level}."
@@ -120,12 +123,14 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "about_title": "About this demo",
                 "about_body": (
                     "- The model segments three tumor types (meningioma, glioma, pituitary) "
-                    "plus background on 2D axial slices of 256×256 pixels.\n"
+                    "plus background on 2D coronal slices of 256×256 pixels.\n"
                     "- Dice and IoU exclude the background because tumor regions cover a "
                     "tiny part of each slice.\n"
                     "- The genetic algorithm tunes the learning rate, weight decay, number "
                     "of filters and depth; this selector lets you compare the baseline "
                     "with the optimized model.\n"
+                    "- The model is conservative and tends to miss small tumors; an empty "
+                    "mask is not proof that the slice is healthy.\n"
                     "- Confidence is the maximum softmax probability on each pixel."
                 ),
             }
@@ -191,7 +196,9 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                     "corte, sobre todo **{dominant}**."
                 ),
                 "interpretation_no_tumor": (
-                    "**No se ha detectado ninguna región tumoral** en este corte."
+                    "**No se ha detectado ninguna región tumoral** en este corte. El modelo "
+                    "es conservador: puede no ver tumores pequeños, así que esto no prueba "
+                    "que el corte sea sano."
                 ),
                 "confidence_summary": (
                     "**Confianza del modelo:** {value:.0%} de media dentro de la región "
@@ -245,12 +252,14 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "about_title": "Sobre esta demo",
                 "about_body": (
                     "- El modelo segmenta tres tipos de tumor (meningioma, glioma e "
-                    "hipófisis) y el fondo en cortes axiales 2D de 256×256 píxeles.\n"
+                    "hipófisis) y el fondo en cortes coronales 2D de 256×256 píxeles.\n"
                     "- Dice e IoU excluyen el fondo porque las regiones tumorales ocupan una "
                     "parte mínima de cada corte.\n"
                     "- El algoritmo genético ajusta la tasa de aprendizaje, la regularización, "
                     "el número de filtros y la profundidad; este selector permite comparar el "
                     "baseline con el modelo optimizado.\n"
+                    "- El modelo es conservador y tiende a no ver tumores pequeños; una "
+                    "máscara vacía no prueba que el corte sea sano.\n"
                     "- La confianza es la probabilidad softmax máxima en cada píxel."
                 ),
             }
