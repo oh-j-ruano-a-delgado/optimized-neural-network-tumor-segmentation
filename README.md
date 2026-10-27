@@ -100,16 +100,17 @@ If the repository is private, clone it with a token or make it public (see the
 
 1. New notebook → Settings → **Accelerator** `T4 x2` (or `P100`) and **Internet** on.
 2. Clone the code **inside `/kaggle/working`** (the only directory that survives the
-   session, so every artifact is kept in the Output tab) and pick the branch that holds
-   the code: `main` only contains the README, `develop` contains the full pipeline:
+   session, so every artifact is kept in the Output tab). `main` only contains the README,
+   so pass the branch that holds the code with `--branch` (no need to change the
+   repository default branch):
 
 ```bash
 %%bash
 set -e
 cd /kaggle/working
-git clone https://github.com/oh-j-ruano-a-delgado/optimized-neural-network-tumor-segmentation.git
+git clone --branch develop --single-branch \
+  https://github.com/oh-j-ruano-a-delgado/optimized-neural-network-tumor-segmentation.git
 cd optimized-neural-network-tumor-segmentation
-git checkout develop
 pip install -q numpy opencv-python h5py kaggle scikit-learn scipy matplotlib pandas pytest
 python -m src.dataset.download_data
 python -m scripts.train_baseline --epochs 40 --device auto --amp
@@ -123,13 +124,15 @@ python -m scripts.train_baseline --epochs 40 --device auto --amp
 %%bash
 set -e
 cd /kaggle/working/optimized-neural-network-tumor-segmentation
-python -m scripts.run_optimization --population-size 12 --generations 6 --epochs 3 --device auto --amp
-python -m scripts.run_random_search --evaluations 67 --epochs 3 --device auto --amp
+python -m scripts.run_optimization --epochs 3 --device auto --amp
+python -m scripts.run_random_search --evaluations 46 --epochs 3 --device auto --amp
 ```
 
-`run_optimization` prints the command that retrains the winning configuration for the
-final model; it adds about one hour. To run without keeping the tab open, use
-**Save & Run All (Commit)** (12-hour limit per session, ~30 GPU-hours per week).
+The default GA configuration (10 individuals, 5 generations, one elite) costs 46 fitness
+evaluations, so the random-search reference uses the same 46. `run_optimization` prints
+the command that retrains the winning configuration for the final model; it adds about
+one hour. To run without keeping the tab open, use **Save & Run All (Commit)**
+(12-hour limit per session, ~30 GPU-hours per week).
 
 ### Google Colab (interactive debugging)
 
@@ -165,15 +168,16 @@ token = UserSecretsClient().get_secret("GITHUB_TOKEN")
 ## Hyperparameter optimization and comparison
 
 ```bash
-python -m scripts.run_optimization --population-size 12 --generations 6   # GA -> runs/optimization/best_hyperparameters.json
-python -m scripts.run_random_search --evaluations 67                      # equal-budget reference -> runs/random_search/
+python -m scripts.run_optimization --epochs 3                             # GA -> runs/optimization/best_hyperparameters.json
+python -m scripts.run_random_search --evaluations 46                      # equal-budget reference -> runs/random_search/
 python -m scripts.evaluate_test_set                                       # baseline vs optimized on the Testing split
 python -m scripts.plot_results                                            # figures and tables -> runs/comparison/
 ```
 
 The winning genome is retrained for the final model with `scripts.train_baseline` (the
 optimization script prints the exact command). Pass `--evaluations` to the random search
-equal to the GA's `fitness_evaluations` for a fair reference curve.
+equal to the GA's `fitness_evaluations` (46 for the default configuration) for a fair
+reference curve.
 
 ## Tests
 
