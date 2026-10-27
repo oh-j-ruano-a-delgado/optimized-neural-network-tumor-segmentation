@@ -51,6 +51,31 @@ python -m scripts.train_baseline --epochs 2 --limit-batches 20       # quick smo
 
 Artifacts are written to `runs/baseline/` (`history.csv` and `best_model.pth`).
 
+## Optimization analysis
+
+```bash
+python -m scripts.run_optimization --epochs 3     # GA -> runs/optimization/best_hyperparameters.json
+python -m scripts.plot_optimization               # convergence and budget-comparison figures
+```
+
+`scripts.plot_optimization` writes `ga_convergence.png` and `ga_fitness_by_generation.png`
+to `runs/optimization/figures/`, plus `budget_comparison.png` once an equal-budget
+random-search JSON exists under `runs/random_search/`. `scripts.run_optimization` prints
+the exact retraining command for the winning genome; retrain it with
+`scripts.train_baseline`.
+
+## Evaluation
+
+```bash
+python -m scripts.evaluate_test_set   # pixel-pooled Dice/IoU + per-slice detection metrics
+python -m scripts.plot_results        # figures and tables -> runs/comparison/
+```
+
+Besides `test_metrics.csv/json`, the evaluation writes `test_slices.csv` (one row per
+slice) and `test_slice_metrics.json` (detection rate, missed tumors and per-slice Dice
+percentiles per model), so small-lesion behaviour is visible next to the pooled scores.
+
+
 ## Cloud training (Kaggle / Colab)
 
 Both platforms ship PyTorch with CUDA preinstalled, so install only the remaining
