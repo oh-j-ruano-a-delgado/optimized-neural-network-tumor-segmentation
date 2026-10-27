@@ -51,13 +51,21 @@ python -m scripts.train_baseline --epochs 2 --limit-batches 20       # quick smo
 
 Artifacts are written to `runs/baseline/` (`history.csv` and `best_model.pth`).
 
+Phase 5 options (defaults reproduce the Phase 2-4 setup):
+
+```bash
+python -m scripts.train_baseline --augmentation advanced --loss focal_tversky_focal   # Focal Tversky (alpha 0.7, beta 0.3, gamma 4/3) + Focal
+python -m scripts.train_baseline --loss dice_ce                                        # Dice + cross-entropy control
+python -m scripts.evaluate_diagnostics --checkpoint runs/optimized/best_model.pth     # per-class precision/recall and confusion matrices on the validation split
+```
+
 ## Cloud training (Kaggle / Colab)
 
 Both platforms ship PyTorch with CUDA preinstalled, so install only the remaining
 dependencies (this avoids re-downloading several GB of torch wheels):
 
 ```bash
-!pip install -q numpy opencv-python h5py kaggle scikit-learn scipy matplotlib pandas pytest
+!pip install -q numpy opencv-python h5py kaggle scikit-learn scipy matplotlib pandas pytest albumentations==2.0.8
 ```
 
 If the repository is private, clone it with a token or make it public (see the
@@ -74,7 +82,7 @@ If the repository is private, clone it with a token or make it public (see the
 %cd /kaggle/temp
 !git clone https://github.com/oh-j-ruano-a-delgado/optimized-neural-network-tumor-segmentation.git
 %cd optimized-neural-network-tumor-segmentation
-!pip install -q numpy opencv-python h5py kaggle scikit-learn scipy matplotlib pandas pytest
+!pip install -q numpy opencv-python h5py kaggle scikit-learn scipy matplotlib pandas pytest albumentations==2.0.8
 !python -m src.dataset.download_data
 !python -m scripts.train_baseline --epochs 40 --device auto --amp
 !cp -r runs/baseline /kaggle/working/

@@ -17,6 +17,11 @@ view, where shorter runs are padded with NaN.
 
 Noisy per-epoch values are drawn as thin translucent traces beneath a thick, glowing centered
 rolling mean, while markers, annotations and summaries always refer to the raw values.
+
+The loss axis is labelled generically ("Loss" unless ``loss_label`` says otherwise) because the
+Phase 5 runs train with different criteria (Dice-Focal, Focal Tversky-Focal, Dice-CE) whose
+values are not on a common scale; runs trained with different losses must be compared by
+validation Dice, not by loss.
 """
 
 from contextlib import contextmanager
@@ -38,6 +43,7 @@ from matplotlib.patheffects import AbstractPathEffect
 from matplotlib.ticker import FormatStrFormatter, MaxNLocator, MultipleLocator
 
 EPOCH_COLUMN: Final[str] = "epoch"
+DEFAULT_LOSS_LABEL: Final[str] = "Loss"
 TRAIN_LOSS_COLUMN: Final[str] = "train_loss"
 VALIDATION_LOSS_COLUMN: Final[str] = "val_loss"
 VALIDATION_DICE_COLUMN: Final[str] = "val_dice_mean"
@@ -565,7 +571,9 @@ def format_epoch_label(prefix: str, value: float, epoch: int, seconds: Optional[
 
 
 def plot_loss_curves(
-    runs: Sequence[TrainingRun], smoothing_window: int = DEFAULT_SMOOTHING_WINDOW
+    runs: Sequence[TrainingRun],
+    smoothing_window: int = DEFAULT_SMOOTHING_WINDOW,
+    loss_label: str = DEFAULT_LOSS_LABEL,
 ) -> Figure:
     with neon_theme():
         figure, (train_axis, validation_axis) = create_figure((15.0, 6.8), columns=2, share_y=True)
@@ -583,7 +591,7 @@ def plot_loss_curves(
         )
         train_axis.set_ylim(0.0, highest_loss * 1.12)
         train_axis.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
-        train_axis.set_ylabel("Dice-Focal loss")
+        train_axis.set_ylabel(loss_label)
 
         summaries: List[Tuple[TrainingRun, ConvergenceSummary]] = []
         for run_index, run in enumerate(runs):

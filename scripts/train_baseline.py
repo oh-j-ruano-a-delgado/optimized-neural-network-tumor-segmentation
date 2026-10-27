@@ -1,7 +1,18 @@
 """Train a U-Net baseline on the Figshare brain tumor dataset.
 
+The data pipeline and the loss are selectable so every Phase 5 ablation runs through the same
+loop: ``--augmentation`` picks the preset from ``src/dataset/transforms.py`` (none, basic,
+advanced) and ``--loss`` picks the criterion from ``src/models/losses.py`` (dice_focal,
+focal_tversky_focal, dice_ce). ``--region-weight`` weights the Dice or Focal Tversky term and
+``--pixel-weight`` the Focal or cross-entropy term; the former names ``--dice-weight`` and
+``--focal-weight`` remain accepted as aliases. The defaults (basic augmentation, Dice-Focal
+0.5 / 0.5, focal gamma 2) reproduce the Phase 2-4 setup, and every argument is stored in the
+checkpoint, so each run records which pipeline and loss produced it.
+
 Usage (from the project root):
     python -m scripts.train_baseline --epochs 40 [--device auto|cpu|cuda] [--amp] [--output-dir runs/baseline]
+        [--augmentation none|basic|advanced] [--loss dice_focal|focal_tversky_focal|dice_ce]
+        [--tversky-alpha 0.7] [--tversky-beta 0.3] [--tversky-gamma 1.3333]
 """
 
 import argparse
@@ -14,7 +25,19 @@ import torch
 
 from src.dataset.constants import NUM_CLASSES, TUMOR_CLASS_NAMES
 from src.dataset.dataloader import get_dataloaders
-from src.models.losses import DiceFocalLoss
+from src.dataset.transforms import AUGMENTATION_PRESETS, DEFAULT_AUGMENTATION_PRESET
+from src.models.losses import (
+    DEFAULT_DICE_WEIGHT,
+    DEFAULT_FOCAL_GAMMA,
+    DEFAULT_FOCAL_WEIGHT,
+    DEFAULT_LOSS_NAME,
+    DEFAULT_TVERSKY_ALPHA,
+    DEFAULT_TVERSKY_BETA,
+    DEFAULT_TVERSKY_GAMMA,
+    LOSS_NAMES,
+    LossSettings,
+    build_criterion,
+)
 from src.models.unet import UNet, count_parameters
 from src.utils.metrics import SegmentationMetrics, SegmentationReport
 from src.utils.training import (
@@ -48,9 +71,28 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--base-filters", type=int, default=16)
     parser.add_argument("--depth", type=int, default=4)
     parser.add_argument("--image-size", type=int, default=DEFAULT_IMAGE_SIZE)
-    parser.add_argument("--dice-weight", type=float, default=0.5)
-    parser.add_argument("--focal-weight", type=float, default=0.5)
-    parser.add_argument("--focal-gamma", type=float, default=2.0)
+    parser.add_argument(
+        "--augmentation", choices=AUGMENTATION_PRESETS, default=DEFAULT_AUGMENTATION_PRESET
+    )
+    parser.add_argument("--loss", choices=LOSS_NAMES, default=DEFAULT_LOSS_NAME)
+    parser.add_argument(
+        "--region-weight",
+        "--dice-weight",
+        dest="region_weight",
+        type=float,
+        default=DEFAULT_DICE_WEIGHT,
+    )
+    parser.add_argument(
+        "--pixel-weight",
+        "--focal-weight",
+        dest="pixel_weight",
+        type=float,
+        default=DEFAULT_FOCAL_WEIGHT,
+    )
+    parser.add_argument("--focal-gamma", type=float, default=DEFAULT_FOCAL_GAMMA)
+    parser.add_argument("--tversky-alpha", type=float, default=DEFAULT_TVERSKY_ALPHA)
+    parser.add_argument("--tversky-beta", type=float, default=DEFAULT_TVERSKY_BETA)
+    parser.add_argument("--tversky-gamma", type=float, default=DEFAULT_TVERSKY_GAMMA)
     parser.add_argument("--validation-fraction", type=float, default=0.2)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
@@ -59,6 +101,18 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--amp", action="store_true")
     return parser.parse_args()
+
+
+def build_loss_settings(arguments: argparse.Namespace) -> LossSettings:
+    return LossSettings(
+        name=arguments.loss,
+        region_weight=arguments.region_weight,
+        pixel_weight=arguments.pixel_weight,
+        focal_gamma=arguments.focal_gamma,
+        tversky_alpha=arguments.tversky_alpha,
+        tversky_beta=arguments.tversky_beta,
+        tversky_gamma=arguments.tversky_gamma,
+    )
 
 
 def build_history_fieldnames(class_names: Sequence[str]) -> List[str]:
@@ -153,9 +207,11 @@ def main() -> None:
         validation_fraction=arguments.validation_fraction,
         num_workers=arguments.num_workers,
         seed=arguments.seed,
+        augmentation=arguments.augmentation,
     )
     print(
         f"Device: {device} | AMP: {'on' if amp_enabled else 'off'} | "
+        f"augmentation {arguments.augmentation} | loss {arguments.loss} | "
         f"train {len(dataloaders.train.dataset)} samples | "
         f"validation {len(dataloaders.validation.dataset)} samples | "
         f"test {len(dataloaders.test.dataset)} samples"
@@ -168,12 +224,7 @@ def main() -> None:
     ).to(device)
     print(f"Model parameters: {count_parameters(model):,}")
 
-    criterion = DiceFocalLoss(
-        dice_weight=arguments.dice_weight,
-        focal_weight=arguments.focal_weight,
-        num_classes=NUM_CLASSES,
-        gamma=arguments.focal_gamma,
-    ).to(device)
+    criterion = build_criterion(build_loss_settings(arguments), NUM_CLASSES).to(device)
     optimizer = torch.optim.Adam(
         model.parameters(), lr=arguments.learning_rate, weight_decay=arguments.weight_decay
     )
