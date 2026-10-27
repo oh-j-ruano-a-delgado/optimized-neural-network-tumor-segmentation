@@ -1,3 +1,21 @@
+"""PyTorch Dataset and DataLoaders for the Figshare brain tumor segmentation slices.
+
+Samples are discovered under ``data/raw/{Training,Testing}/<tumor type>/{images,masks}``; the
+Training folder is split into training and validation subsets by patient (stratified by tumor
+type), and the Testing folder is the held-out test set. ``BrainTumorSegmentationDataset`` only
+reads files and delegates all preprocessing and augmentation to the injected
+``SegmentationTransform``, so the augmentation preset is chosen in ``get_dataloaders`` and only
+the training subset is ever augmented.
+
+``cv2.imread`` returns None for non-ASCII paths on Windows (e.g. "3º"), so image bytes are loaded
+through NumPy and decoded in memory instead.
+
+Every DataLoader receives a generator seeded with ``seed``, which fixes the shuffle order and the
+base seed of each worker's Torch generator. The augmentation pipeline reseeds itself from that
+Torch generator on every sample, so each metaheuristic fitness evaluation sees the same batches
+and the same augmentations, while different workers still draw different augmentations.
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, NamedTuple, Sequence, Tuple
@@ -20,7 +38,9 @@ from .constants import (
 )
 from .splits import split_patients_stratified
 from .transforms import (
+    DEFAULT_AUGMENTATION_PRESET,
     DEFAULT_IMAGE_SIZE,
+    AugmentationPreset,
     ImageSize,
     NormalizationMode,
     SegmentationTransform,
@@ -46,8 +66,6 @@ class SegmentationDataLoaders(NamedTuple):
 
 
 def read_image_file(path: Path, read_flag: int) -> NDArray[np.generic]:
-    # cv2.imread returns None for non-ASCII paths on Windows (e.g. "3º"), so the
-    # bytes are loaded through NumPy and decoded in memory instead.
     image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), read_flag)
     if image is None:
         raise OSError(f"Could not decode image file '{path}'.")
@@ -114,8 +132,6 @@ def build_dataloader(
     num_workers: int,
     seed: int,
 ) -> DataLoader[SegmentationBatch]:
-    # A seeded generator fixes the shuffle order and each worker's base seed, so
-    # every metaheuristic fitness evaluation sees the same batches and augmentations.
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -136,13 +152,14 @@ def get_dataloaders(
     num_workers: int = 0,
     seed: int = 42,
     data_dir: Path = RAW_DATA_DIR,
+    augmentation: AugmentationPreset = DEFAULT_AUGMENTATION_PRESET,
 ) -> SegmentationDataLoaders:
     training_samples, validation_samples = split_samples_by_patient(
         discover_samples(data_dir / TRAINING_SPLIT), validation_fraction, seed
     )
     testing_samples = discover_samples(data_dir / TESTING_SPLIT)
 
-    training_transform = build_training_transform(image_size, normalization)
+    training_transform = build_training_transform(image_size, normalization, augmentation)
     evaluation_transform = build_evaluation_transform(image_size, normalization)
 
     return SegmentationDataLoaders(
