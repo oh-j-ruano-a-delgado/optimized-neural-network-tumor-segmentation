@@ -13,12 +13,18 @@ checkpoint, so each run records which pipeline and loss produced it.
 N consecutive epochs; the checkpoint always holds the best epoch, so ``--epochs`` becomes an upper
 bound. It is disabled by default, which keeps the fixed-length runs of earlier phases reproducible.
 
+``--lr-schedule`` selects the learning-rate schedule from ``src/utils/training.py``: "constant"
+(default, the Phase 2-5 behaviour) or "cosine", which anneals the rate from ``--learning-rate``
+to zero over exactly ``--epochs`` epochs (``CosineAnnealingLR(optimizer, T_max=epochs)``, stepped
+once per epoch). The rate used in each epoch is written to the ``learning_rate`` column of
+``history.csv`` so the schedule can be verified after a run.
+
 Usage (from the project root):
     python -m scripts.train_baseline --epochs 40 [--device auto|cpu|cuda] [--amp] [--output-dir runs/baseline]
         [--augmentation none|basic|advanced_spatial|advanced_intensity|advanced]
         [--loss dice_focal|focal_tversky_focal|dice_ce]
         [--tversky-alpha 0.7] [--tversky-beta 0.3] [--tversky-gamma 1.3333]
-        [--early-stopping-patience 20]
+        [--early-stopping-patience 20] [--lr-schedule constant|cosine]
 """
 
 import argparse
@@ -51,6 +57,10 @@ from src.utils.training import (
     evaluate_epoch,
     resolve_amp_mode,
     resolve_device,
+    DEFAULT_LEARNING_RATE_SCHEDULE,
+    LEARNING_RATE_SCHEDULES,
+    build_learning_rate_scheduler,
+    current_learning_rate,
     resolve_max_batches,
     set_global_seed,
     should_stop_early,
@@ -66,6 +76,7 @@ DEFAULT_IMAGE_SIZE: Final[int] = 256
 DEFAULT_SEED: Final[int] = 42
 DEFAULT_OUTPUT_DIR: Final[Path] = Path("runs/baseline")
 ELAPSED_COLUMN: Final[str] = "elapsed_seconds"
+LEARNING_RATE_COLUMN: Final[str] = "learning_rate"
 MEAN_COLUMNS: Final[Dict[str, str]] = {"dice": "val_dice_mean", "iou": "val_iou_mean"}
 PER_CLASS_COLUMNS: Final[Dict[str, str]] = {"dice": "val_dice", "iou": "val_iou"}
 
@@ -106,6 +117,9 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--limit-batches", type=int, default=None)
     parser.add_argument("--early-stopping-patience", type=int, default=None)
+    parser.add_argument(
+        "--lr-schedule", choices=LEARNING_RATE_SCHEDULES, default=DEFAULT_LEARNING_RATE_SCHEDULE
+    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--amp", action="store_true")
@@ -136,6 +150,7 @@ def build_history_fieldnames(class_names: Sequence[str]) -> List[str]:
         MEAN_COLUMNS["iou"],
         *iou_fields,
         ELAPSED_COLUMN,
+        LEARNING_RATE_COLUMN,
     ]
 
 
@@ -145,6 +160,7 @@ def build_history_row(
     validation_loss: float,
     report: SegmentationReport,
     elapsed_seconds: float,
+    learning_rate: float,
 ) -> Dict[str, object]:
     row: Dict[str, object] = {
         "epoch": epoch,
@@ -153,6 +169,7 @@ def build_history_row(
         MEAN_COLUMNS["dice"]: round(report.mean_dice, 6),
         MEAN_COLUMNS["iou"]: round(report.mean_iou, 6),
         ELAPSED_COLUMN: round(elapsed_seconds, 3),
+        LEARNING_RATE_COLUMN: float(f"{learning_rate:.6g}"),
     }
     for metric_name, scores in (
         ("dice", report.dice_by_class),
@@ -197,7 +214,7 @@ def describe_history_row(row: Dict[str, object], total_epochs: int) -> str:
         f"Epoch {row['epoch']:>3}/{total_epochs} | "
         f"train loss {row['train_loss']:.4f} | val loss {row['val_loss']:.4f} | "
         f"val dice {row[MEAN_COLUMNS['dice']]:.4f} | val iou {row[MEAN_COLUMNS['iou']]:.4f} | "
-        f"{row[ELAPSED_COLUMN]:.1f}s"
+        f"lr {row[LEARNING_RATE_COLUMN]:.2e} | {row[ELAPSED_COLUMN]:.1f}s"
     )
 
 
@@ -222,6 +239,7 @@ def main() -> None:
     print(
         f"Device: {device} | AMP: {'on' if amp_enabled else 'off'} | "
         f"augmentation {arguments.augmentation} | loss {arguments.loss} | "
+        f"lr schedule {arguments.lr_schedule} | "
         f"train {len(dataloaders.train.dataset)} samples | "
         f"validation {len(dataloaders.validation.dataset)} samples | "
         f"test {len(dataloaders.test.dataset)} samples"
@@ -238,6 +256,7 @@ def main() -> None:
     optimizer = torch.optim.Adam(
         model.parameters(), lr=arguments.learning_rate, weight_decay=arguments.weight_decay
     )
+    scheduler = build_learning_rate_scheduler(optimizer, arguments.lr_schedule, arguments.epochs)
     metrics = SegmentationMetrics(num_classes=NUM_CLASSES)
 
     class_names = [TUMOR_CLASS_NAMES[index] for index in metrics.class_indices]
@@ -249,6 +268,7 @@ def main() -> None:
 
     for epoch in range(1, arguments.epochs + 1):
         start_time = time.perf_counter()
+        epoch_learning_rate = current_learning_rate(optimizer)
         train_loss = train_epoch(
             model,
             dataloaders.train,
@@ -268,8 +288,15 @@ def main() -> None:
             device,
             resolve_max_batches(dataloaders.validation, arguments.limit_batches),
         )
+        if scheduler is not None:
+            scheduler.step()
         row = build_history_row(
-            epoch, train_loss, validation_loss, report, time.perf_counter() - start_time
+            epoch,
+            train_loss,
+            validation_loss,
+            report,
+            time.perf_counter() - start_time,
+            epoch_learning_rate,
         )
         history.append(row)
         write_history_csv(output_dir / "history.csv", fieldnames, history)

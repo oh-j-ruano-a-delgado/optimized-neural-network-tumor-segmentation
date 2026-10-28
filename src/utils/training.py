@@ -8,18 +8,31 @@ Early stopping monitors the same quantity that selects the checkpoint (mean vali
 the tumor classes): ``should_stop_early`` returns True once ``patience`` epochs have passed since
 the best epoch, so the saved checkpoint is always the best one seen and training never continues
 for more than ``patience`` epochs without a new best. A patience of None disables it.
+
+Learning-rate schedules: "constant" keeps the optimizer's learning rate fixed (the Phase 2-5
+setup) and returns no scheduler. "cosine" returns ``CosineAnnealingLR(optimizer,
+T_max=total_epochs)``, stepped once per epoch after the training pass, so the rate decays from
+its initial value to zero along half a cosine period that ends exactly at the last epoch. Late
+epochs therefore take small steps, which damps the epoch-to-epoch swings in validation Dice that
+a constant rate produces. If early stopping ends a run before ``total_epochs``, the cosine curve
+is left unfinished, so cosine runs should normally disable early stopping.
 """
 
 import random
-from typing import Optional, Tuple
+from typing import Final, Literal, Optional, Tuple, get_args
 
 import numpy as np
 import torch
 from torch import Tensor, nn
+from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler
 from torch.utils.data import DataLoader
 
 from ..dataset.dataloader import SegmentationBatch
 from .metrics import SegmentationMetrics, SegmentationReport
+
+LearningRateSchedule = Literal["constant", "cosine"]
+LEARNING_RATE_SCHEDULES: Final[Tuple[str, ...]] = get_args(LearningRateSchedule)
+DEFAULT_LEARNING_RATE_SCHEDULE: Final[LearningRateSchedule] = "constant"
 
 
 def set_global_seed(seed: int) -> None:
@@ -59,6 +72,25 @@ def validate_early_stopping_patience(patience: Optional[int]) -> None:
 def should_stop_early(current_epoch: int, best_epoch: int, patience: Optional[int]) -> bool:
     validate_early_stopping_patience(patience)
     return patience is not None and current_epoch - best_epoch >= patience
+
+
+def build_learning_rate_scheduler(
+    optimizer: torch.optim.Optimizer, schedule: LearningRateSchedule, total_epochs: int
+) -> Optional[LRScheduler]:
+    if schedule not in LEARNING_RATE_SCHEDULES:
+        raise ValueError(
+            f"Unknown learning-rate schedule '{schedule}', expected one of "
+            f"{LEARNING_RATE_SCHEDULES}."
+        )
+    if total_epochs < 1:
+        raise ValueError(f"total_epochs must be at least 1, got {total_epochs}.")
+    if schedule == "cosine":
+        return CosineAnnealingLR(optimizer, T_max=total_epochs)
+    return None
+
+
+def current_learning_rate(optimizer: torch.optim.Optimizer) -> float:
+    return float(optimizer.param_groups[0]["lr"])
 
 
 def resolve_max_batches(loader: DataLoader[SegmentationBatch], limit: Optional[int]) -> int:

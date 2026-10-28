@@ -4,6 +4,9 @@ The epoch tests train a real U-Net on a tiny random dataset (4 images of 32 x 32
 training pass lowers the loss and an evaluation pass yields finite metrics. The early-stopping
 tests pin down the patience semantics: with patience N, training stops at the first epoch that is
 N epochs after the best one, never earlier, and a missing patience disables early stopping.
+The learning-rate schedule tests step a real Adam optimizer once per epoch and check the cosine
+curve at its start, midpoint and end (base rate, half the base rate, zero) against the closed
+form, and that the constant schedule returns no scheduler at all.
 """
 
 import math
@@ -16,7 +19,10 @@ from src.models.losses import DiceFocalLoss
 from src.models.unet import UNet
 from src.utils.metrics import SegmentationMetrics
 from src.utils.training import (
+    LEARNING_RATE_SCHEDULES,
     build_grad_scaler,
+    build_learning_rate_scheduler,
+    current_learning_rate,
     evaluate_epoch,
     resolve_amp_mode,
     resolve_device,
@@ -132,3 +138,57 @@ def test_early_stopping_rejects_non_positive_patience(patience: int) -> None:
         validate_early_stopping_patience(patience)
     with pytest.raises(ValueError, match="patience"):
         should_stop_early(current_epoch=10, best_epoch=1, patience=patience)
+
+
+def build_optimizer(learning_rate: float = 1e-3) -> torch.optim.Optimizer:
+    return torch.optim.Adam([torch.nn.Parameter(torch.zeros(1))], lr=learning_rate)
+
+
+def test_constant_schedule_returns_no_scheduler() -> None:
+    optimizer = build_optimizer()
+    assert build_learning_rate_scheduler(optimizer, "constant", total_epochs=10) is None
+    assert current_learning_rate(optimizer) == pytest.approx(1e-3)
+
+
+def test_cosine_schedule_follows_half_a_cosine_period() -> None:
+    base_rate, total_epochs = 1e-3, 150
+    optimizer = build_optimizer(base_rate)
+    scheduler = build_learning_rate_scheduler(optimizer, "cosine", total_epochs)
+    rates = []
+    for _ in range(total_epochs):
+        rates.append(current_learning_rate(optimizer))
+        optimizer.step()
+        scheduler.step()
+    expected = [
+        0.5 * base_rate * (1.0 + math.cos(math.pi * epoch / total_epochs))
+        for epoch in range(total_epochs)
+    ]
+    assert rates == pytest.approx(expected, rel=1e-6, abs=1e-12)
+    assert rates[0] == pytest.approx(base_rate)
+    assert rates[total_epochs // 2] == pytest.approx(base_rate / 2)
+    assert current_learning_rate(optimizer) == pytest.approx(0.0, abs=1e-12)
+
+
+def test_cosine_schedule_decreases_monotonically() -> None:
+    optimizer = build_optimizer()
+    scheduler = build_learning_rate_scheduler(optimizer, "cosine", total_epochs=20)
+    rates = []
+    for _ in range(20):
+        rates.append(current_learning_rate(optimizer))
+        optimizer.step()
+        scheduler.step()
+    assert all(earlier > later for earlier, later in zip(rates, rates[1:]))
+
+
+def test_schedule_names_are_constant_and_cosine() -> None:
+    assert LEARNING_RATE_SCHEDULES == ("constant", "cosine")
+
+
+def test_unknown_schedule_is_rejected() -> None:
+    with pytest.raises(ValueError, match="Unknown learning-rate schedule"):
+        build_learning_rate_scheduler(build_optimizer(), "step", total_epochs=10)
+
+
+def test_schedule_rejects_non_positive_epochs() -> None:
+    with pytest.raises(ValueError, match="total_epochs"):
+        build_learning_rate_scheduler(build_optimizer(), "cosine", total_epochs=0)
