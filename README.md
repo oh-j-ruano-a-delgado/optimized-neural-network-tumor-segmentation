@@ -65,6 +65,17 @@ spatial only), `advanced_intensity` (basic spatial + intensity) and `advanced` (
 `--early-stopping-patience N`, training stops after N epochs without a new best validation Dice.
 With `--lr-schedule cosine`, the learning rate anneals to zero over `--epochs` epochs.
 
+Phase 7 options (transfer learning with `segmentation_models_pytorch`):
+
+```bash
+python -m scripts.train_baseline --model smp_unet --encoder resnet34 --encoder-lr-multiplier 0.1   # ImageNet-pretrained ResNet34 encoder, encoder at 1/10 of --learning-rate
+python -m scripts.train_baseline --model smp_unet --encoder resnet34 --encoder-weights none        # same network from random initialization (pretraining control)
+```
+
+`--model unet` (default) keeps the custom U-Net. The ImageNet weights are downloaded from the
+Hugging Face Hub the first time an SMP model is built for training, so that step needs internet
+access; evaluating a saved checkpoint does not.
+
 Local experiment archive (`runs/` is gitignored): runs are grouped by phase and numbered in
 chronological order, e.g. `runs/baseline_vs_ga/02_A_ga_optimized/` or
 `runs/phase6_capacity_and_lr_schedule/10_E_ultimate_unet/`. The evaluation and plotting scripts
@@ -76,7 +87,7 @@ Both platforms ship PyTorch with CUDA preinstalled, so install only the remainin
 dependencies (this avoids re-downloading several GB of torch wheels):
 
 ```bash
-!pip install -q numpy opencv-python h5py kaggle scikit-learn scipy matplotlib pandas pytest albumentations==2.0.8
+!pip install -q numpy opencv-python h5py kaggle scikit-learn scipy matplotlib pandas pytest albumentations==2.0.8 segmentation-models-pytorch==0.6.0
 ```
 
 If the repository is private, clone it with a token or make it public (see the
@@ -93,7 +104,7 @@ If the repository is private, clone it with a token or make it public (see the
 %cd /kaggle/temp
 !git clone https://github.com/oh-j-ruano-a-delgado/optimized-neural-network-tumor-segmentation.git
 %cd optimized-neural-network-tumor-segmentation
-!pip install -q numpy opencv-python h5py kaggle scikit-learn scipy matplotlib pandas pytest albumentations==2.0.8
+!pip install -q numpy opencv-python h5py kaggle scikit-learn scipy matplotlib pandas pytest albumentations==2.0.8 segmentation-models-pytorch==0.6.0
 !python -m src.dataset.download_data
 !python -m scripts.train_baseline --epochs 40 --device auto --amp
 !cp -r runs/baseline /kaggle/working/

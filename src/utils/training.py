@@ -16,8 +16,21 @@ its initial value to zero along half a cosine period that ends exactly at the la
 epochs therefore take small steps, which damps the epoch-to-epoch swings in validation Dice that
 a constant rate produces. If early stopping ends a run before ``total_epochs``, the cosine curve
 is left unfinished, so cosine runs should normally disable early stopping.
+
+Optimizer: ``build_optimizer`` creates the Adam optimizer of every run. With an encoder
+learning-rate multiplier of 1 (the default) it holds a single parameter group, exactly as in
+Phases 2-6. Any other multiplier requires a model with a pretrained encoder (``--model smp_unet``)
+and creates two groups with the same weight decay: the randomly initialized decoder and
+segmentation head at the base learning rate (group 0), and the pretrained encoder at the base rate
+times the multiplier (group 1). A multiplier below 1 lets the new layers learn at full speed while
+the ImageNet features change slowly, so the large, noisy gradients of the untrained decoder in the
+first epochs cannot overwrite them. The cosine schedule anneals each group from its own initial
+rate, so the encoder rate stays the multiplier times the decoder rate for the whole run, and
+``current_learning_rate`` (group 0, the ``learning_rate`` column of ``history.csv``) keeps
+reporting the base rate.
 """
 
+import math
 import random
 from typing import Final, Literal, Optional, Tuple, get_args
 
@@ -28,11 +41,13 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler
 from torch.utils.data import DataLoader
 
 from ..dataset.dataloader import SegmentationBatch
+from ..models.factory import split_encoder_parameters
 from .metrics import SegmentationMetrics, SegmentationReport
 
 LearningRateSchedule = Literal["constant", "cosine"]
 LEARNING_RATE_SCHEDULES: Final[Tuple[str, ...]] = get_args(LearningRateSchedule)
 DEFAULT_LEARNING_RATE_SCHEDULE: Final[LearningRateSchedule] = "constant"
+DEFAULT_ENCODER_LR_MULTIPLIER: Final[float] = 1.0
 
 
 def set_global_seed(seed: int) -> None:
@@ -87,6 +102,33 @@ def build_learning_rate_scheduler(
     if schedule == "cosine":
         return CosineAnnealingLR(optimizer, T_max=total_epochs)
     return None
+
+
+def validate_encoder_lr_multiplier(multiplier: float) -> None:
+    if not math.isfinite(multiplier) or multiplier <= 0.0:
+        raise ValueError(
+            f"The encoder learning-rate multiplier must be positive, got {multiplier}."
+        )
+
+
+def build_optimizer(
+    model: nn.Module,
+    learning_rate: float,
+    weight_decay: float,
+    encoder_lr_multiplier: float = DEFAULT_ENCODER_LR_MULTIPLIER,
+) -> torch.optim.Adam:
+    validate_encoder_lr_multiplier(encoder_lr_multiplier)
+    if encoder_lr_multiplier == DEFAULT_ENCODER_LR_MULTIPLIER:
+        return torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    encoder_parameters, other_parameters = split_encoder_parameters(model)
+    return torch.optim.Adam(
+        [
+            {"params": other_parameters, "lr": learning_rate},
+            {"params": encoder_parameters, "lr": learning_rate * encoder_lr_multiplier},
+        ],
+        lr=learning_rate,
+        weight_decay=weight_decay,
+    )
 
 
 def current_learning_rate(optimizer: torch.optim.Optimizer) -> float:
