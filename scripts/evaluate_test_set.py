@@ -9,6 +9,11 @@ three classes (the validation metric), and for the whole tumor, where every tumo
 merged into one foreground label so localization quality can be told apart from tumor-type
 confusion.
 
+The two checkpoints are reported under ``--reference-name`` and ``--challenger-name`` (default
+"baseline" and "optimized", the Phase 4 pair that ``scripts/plot_results.py`` styles). Later
+comparisons, such as the GA-optimized Run A against the Phase 6 Run E, pass their own names so
+the tables and the JSON never mislabel a run; the names must differ because they key the JSON.
+
 Outputs (in ``--output-dir``):
     test_metrics.csv   tidy table (model, region, dice, iou) consumed by scripts/plot_results.py
     test_metrics.json  the same scores plus checkpoint metadata and test-set composition
@@ -17,6 +22,7 @@ Usage (from the project root):
     python -m scripts.evaluate_test_set [--baseline-checkpoint runs/baseline/best_model.pth]
         [--optimized-checkpoint runs/optimized/best_model.pth] [--device auto|cpu|cuda] [--amp]
         [--batch-size 8] [--output-dir runs/comparison]
+        [--reference-name baseline] [--challenger-name optimized]
 """
 
 import argparse
@@ -69,6 +75,7 @@ WHOLE_TUMOR_CLASSES: Final[int] = 2
 CSV_FIELDNAMES: Final[Tuple[str, ...]] = ("model", "region", "dice", "iou")
 REFERENCE_MODEL: Final[str] = "baseline"
 CHALLENGER_MODEL: Final[str] = "optimized"
+MINIMUM_SCORE_COLUMN_WIDTH: Final[int] = 10
 
 
 @dataclass(frozen=True)
@@ -100,7 +107,16 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--amp", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--reference-name", default=REFERENCE_MODEL)
+    parser.add_argument("--challenger-name", default=CHALLENGER_MODEL)
     return parser.parse_args()
+
+
+def validate_model_names(reference_name: str, challenger_name: str) -> None:
+    if reference_name == challenger_name:
+        raise ValueError(
+            f"--reference-name and --challenger-name must differ, both are '{reference_name}'."
+        )
 
 
 def build_test_loader(
@@ -244,18 +260,20 @@ def write_metrics_json(
 
 
 def format_comparison_table(reference: ModelEvaluation, challenger: ModelEvaluation) -> List[str]:
+    width = max(MINIMUM_SCORE_COLUMN_WIDTH, len(reference.name), len(challenger.name)) + 7
     header = (
-        f"{'Region':<13}{'Dice ' + reference.name:>17}{'Dice ' + challenger.name:>17}"
-        f"{'Delta':>9}{'IoU ' + reference.name:>17}{'IoU ' + challenger.name:>17}{'Delta':>9}"
+        f"{'Region':<13}{'Dice ' + reference.name:>{width}}{'Dice ' + challenger.name:>{width}}"
+        f"{'Delta':>9}{'IoU ' + reference.name:>{width}}{'IoU ' + challenger.name:>{width}}"
+        f"{'Delta':>9}"
     )
     lines = [header, "-" * len(header)]
     for reference_score in reference.scores:
         challenger_score = challenger.score_for(reference_score.region)
         lines.append(
             f"{reference_score.region:<13}"
-            f"{reference_score.dice:>17.4f}{challenger_score.dice:>17.4f}"
+            f"{reference_score.dice:>{width}.4f}{challenger_score.dice:>{width}.4f}"
             f"{challenger_score.dice - reference_score.dice:>+9.4f}"
-            f"{reference_score.iou:>17.4f}{challenger_score.iou:>17.4f}"
+            f"{reference_score.iou:>{width}.4f}{challenger_score.iou:>{width}.4f}"
             f"{challenger_score.iou - reference_score.iou:>+9.4f}"
         )
     return lines
@@ -265,7 +283,7 @@ def describe_checkpoint(evaluation: ModelEvaluation) -> str:
     checkpoint = evaluation.checkpoint
     hyperparameters = checkpoint.hyperparameters
     return (
-        f"{evaluation.name:<10} | epoch {checkpoint.epoch:>3} | "
+        f"{evaluation.name:<16} | epoch {checkpoint.epoch:>3} | "
         f"validation Dice {checkpoint.validation_dice:.4f} | "
         f"lr {hyperparameters.get('learning_rate', float('nan')):.3g} | "
         f"wd {hyperparameters.get('weight_decay', float('nan')):.3g} | "
@@ -277,6 +295,7 @@ def describe_checkpoint(evaluation: ModelEvaluation) -> str:
 
 def main() -> None:
     arguments = parse_arguments()
+    validate_model_names(arguments.reference_name, arguments.challenger_name)
     device = resolve_device(arguments.device)
     amp_enabled = resolve_amp_mode(arguments.amp, device)
     samples = discover_samples(arguments.data_dir / TESTING_SPLIT)
@@ -291,8 +310,8 @@ def main() -> None:
     evaluations = [
         evaluate_checkpoint(name, checkpoint_path, samples, arguments, device, amp_enabled)
         for name, checkpoint_path in (
-            (REFERENCE_MODEL, arguments.baseline_checkpoint),
-            (CHALLENGER_MODEL, arguments.optimized_checkpoint),
+            (arguments.reference_name, arguments.baseline_checkpoint),
+            (arguments.challenger_name, arguments.optimized_checkpoint),
         )
     ]
     for evaluation in evaluations:
