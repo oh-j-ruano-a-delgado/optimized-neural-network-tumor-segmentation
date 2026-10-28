@@ -18,10 +18,11 @@ Outputs (in ``--output-dir``):
     test_metrics.csv   tidy table (model, region, dice, iou) consumed by scripts/plot_results.py
     test_metrics.json  the same scores plus checkpoint metadata and test-set composition
 
-Usage (from the project root):
-    python -m scripts.evaluate_test_set [--baseline-checkpoint runs/baseline/best_model.pth]
-        [--optimized-checkpoint runs/optimized/best_model.pth] [--device auto|cpu|cuda] [--amp]
-        [--batch-size 8] [--output-dir runs/comparison]
+Usage (from the project root; P4 = runs/phase4_baseline_vs_ga):
+    python -m scripts.evaluate_test_set [--baseline-checkpoint P4/01_baseline_manual/best_model.pth]
+        [--optimized-checkpoint P4/02_A_ga_optimized/best_model.pth]
+        [--device auto|cpu|cuda] [--amp] [--batch-size 8]
+        [--output-dir P4/03_test_comparison_baseline_vs_A]
         [--reference-name baseline] [--challenger-name optimized]
 """
 
@@ -62,9 +63,10 @@ from src.utils.checkpoint import (
 from src.utils.metrics import SegmentationMetrics, SegmentationReport
 from src.utils.training import resolve_amp_mode, resolve_device, transfer_batch
 
-DEFAULT_BASELINE_CHECKPOINT: Final[Path] = Path("runs/baseline/best_model.pth")
-DEFAULT_OPTIMIZED_CHECKPOINT: Final[Path] = Path("runs/optimized/best_model.pth")
-DEFAULT_OUTPUT_DIR: Final[Path] = Path("runs/comparison")
+PHASE4_RUNS_DIR: Final[Path] = Path("runs/baseline_vs_ga")
+DEFAULT_BASELINE_CHECKPOINT: Final[Path] = PHASE4_RUNS_DIR / "01_baseline_manual" / "best_model.pth"
+DEFAULT_OPTIMIZED_CHECKPOINT: Final[Path] = PHASE4_RUNS_DIR / "02_A_ga_optimized" / "best_model.pth"
+DEFAULT_OUTPUT_DIR: Final[Path] = PHASE4_RUNS_DIR / "03_test_comparison_baseline_vs_A"
 DEFAULT_BATCH_SIZE: Final[int] = 8
 DEFAULT_SEED: Final[int] = 42
 METRICS_CSV_FILENAME: Final[str] = "test_metrics.csv"

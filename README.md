@@ -57,12 +57,18 @@ Phase 5 options (defaults reproduce the Phase 2-4 setup):
 python -m scripts.train_baseline --augmentation advanced --loss focal_tversky_focal   # Focal Tversky (alpha 0.7, beta 0.3, gamma 4/3) + Focal
 python -m scripts.train_baseline --loss dice_ce                                        # Dice + cross-entropy control
 python -m scripts.train_baseline --augmentation advanced_spatial --loss focal_tversky_focal --epochs 200 --early-stopping-patience 20
-python -m scripts.evaluate_diagnostics --checkpoint runs/optimized/best_model.pth     # per-class precision/recall and confusion matrices on the validation split
+python -m scripts.evaluate_diagnostics --checkpoint runs/baseline_vs_ga/02_A_ga_optimized/best_model.pth     # per-class precision/recall and confusion matrices on the validation split
 ```
 
 Augmentation presets form a 2 x 2 design: `basic` (basic spatial), `advanced_spatial` (advanced
 spatial only), `advanced_intensity` (basic spatial + intensity) and `advanced` (both). With
 `--early-stopping-patience N`, training stops after N epochs without a new best validation Dice.
+With `--lr-schedule cosine`, the learning rate anneals to zero over `--epochs` epochs.
+
+Local experiment archive (`runs/` is gitignored): runs are grouped by phase and numbered in
+chronological order, e.g. `runs/baseline_vs_ga/02_A_ga_optimized/` or
+`runs/phase6_capacity_and_lr_schedule/10_E_ultimate_unet/`. The evaluation and plotting scripts
+default to the Phase 4 folders of this layout.
 
 ## Cloud training (Kaggle / Colab)
 

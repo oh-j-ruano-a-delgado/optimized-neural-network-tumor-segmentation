@@ -10,10 +10,11 @@ Tables (in ``<output-dir>``), the table view behind the figures:
     convergence_summary.csv     best epoch, best Dice, time to best, epoch reaching baseline best
     training_curves_aligned.csv both histories side by side on a shared epoch index (NaN-padded)
 
-Usage (from the project root):
-    python -m scripts.plot_results [--baseline-history runs/baseline/history.csv]
-        [--optimized-history runs/optimized/history.csv]
-        [--test-metrics runs/comparison/test_metrics.csv] [--output-dir runs/comparison]
+Usage (from the project root; P4 = runs/phase4_baseline_vs_ga):
+    python -m scripts.plot_results [--baseline-history P4/01_baseline_manual/history.csv]
+        [--optimized-history P4/02_A_ga_optimized/history.csv]
+        [--test-metrics P4/03_test_comparison_baseline_vs_A/test_metrics.csv]
+        [--output-dir P4/03_test_comparison_baseline_vs_A]
         [--smoothing-window 5] [--formats png pdf] [--dpi 200]
 """
 
@@ -39,9 +40,10 @@ from src.utils.visualization import (
     save_figure,
 )
 
-DEFAULT_BASELINE_HISTORY: Final[Path] = Path("runs/baseline/history.csv")
-DEFAULT_OPTIMIZED_HISTORY: Final[Path] = Path("runs/optimized/history.csv")
-DEFAULT_OUTPUT_DIR: Final[Path] = Path("runs/comparison")
+PHASE4_RUNS_DIR: Final[Path] = Path("runs/baseline_vs_ga")
+DEFAULT_BASELINE_HISTORY: Final[Path] = PHASE4_RUNS_DIR / "01_baseline_manual" / "history.csv"
+DEFAULT_OPTIMIZED_HISTORY: Final[Path] = PHASE4_RUNS_DIR / "02_A_ga_optimized" / "history.csv"
+DEFAULT_OUTPUT_DIR: Final[Path] = PHASE4_RUNS_DIR / "03_test_comparison_baseline_vs_A"
 FIGURES_DIRNAME: Final[str] = "figures"
 CONVERGENCE_FILENAME: Final[str] = "convergence_summary.csv"
 ALIGNED_HISTORY_FILENAME: Final[str] = "training_curves_aligned.csv"

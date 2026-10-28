@@ -28,8 +28,8 @@ Outputs (in ``--output-dir``):
     diagnostics.json        every metric above plus raw pixel and slice confusion matrices
     slice_diagnostics.csv   one row per slice with its pixel counts and Dice scores
 
-Usage (from the project root):
-    python -m scripts.evaluate_diagnostics [--checkpoint runs/optimized/best_model.pth]
+Usage (from the project root; P4 = runs/phase4_baseline_vs_ga):
+    python -m scripts.evaluate_diagnostics [--checkpoint P4/02_A_ga_optimized/best_model.pth]
         [--split validation|test] [--device auto|cpu|cuda] [--amp] [--batch-size 8]
         [--num-workers 0] [--output-dir runs/diagnostics]
 """
@@ -84,7 +84,8 @@ from src.utils.diagnostics import (
 )
 from src.utils.training import resolve_amp_mode, resolve_device, transfer_batch
 
-DEFAULT_CHECKPOINT: Final[Path] = Path("runs/optimized/best_model.pth")
+PHASE4_RUNS_DIR: Final[Path] = Path("runs/baseline_vs_ga")
+DEFAULT_CHECKPOINT: Final[Path] = PHASE4_RUNS_DIR / "02_A_ga_optimized" / "best_model.pth"
 DEFAULT_OUTPUT_DIR: Final[Path] = Path("runs/diagnostics")
 DEFAULT_BATCH_SIZE: Final[int] = 8
 DEFAULT_VALIDATION_FRACTION: Final[float] = 0.2
