@@ -81,6 +81,39 @@ chronological order, e.g. `runs/baseline_vs_ga/02_A_ga_optimized/` or
 `runs/phase6_capacity_and_lr_schedule/10_E_ultimate_unet/`. The evaluation and plotting scripts
 default to the Phase 4 folders of this layout.
 
+## Interface (Streamlit)
+
+An interactive, bilingual (English/Spanish) demo that guides visitors through three
+steps: choose a slice, look at the four views (preprocessed input, per-class overlay,
+predicted mask and per-pixel confidence map) and read a plain-language interpretation
+with the detected tumor type, its share of the slice and how confident the model is.
+Nine slices from the held-out Testing split ship with the repository under
+`app/samples/`, so the app can be tried without uploading anything, while any PNG in
+the same domain can also be uploaded. Technical controls (checkpoint selection, overlay
+opacity, confidence threshold) live in a collapsed "Advanced settings" section.
+
+```bash
+pip install -r requirements.txt
+streamlit run app/main.py
+```
+
+The app ships two checkpoints: `app/models/baseline_unet.pth` (manually tuned
+baseline) and `app/models/optimized_unet.pth` (genetic-algorithm winner). Both appear in
+the "Advanced settings" checkpoint selector, which defaults to the optimized one. To
+refresh a checkpoint, copy a trained `runs/.../best_model.pth` over it:
+
+```bash
+cp runs/optimized/best_model.pth app/models/optimized_unet.pth
+```
+
+### Deploy on Streamlit Community Cloud
+
+1. Push the repository to GitHub and make it public (or grant Streamlit access to it).
+2. Sign in at <https://share.streamlit.io> with GitHub and click **New app**.
+3. Select the repository and the branch that contains the interface (or `develop` once
+   it is merged), set the main file to `app/main.py` and deploy. Streamlit installs
+    `requirements.txt` automatically; no secrets are required.
+
 ## Cloud training (Kaggle / Colab)
 
 Both platforms ship PyTorch with CUDA preinstalled, so install only the remaining
@@ -96,22 +129,40 @@ If the repository is private, clone it with a token or make it public (see the
 ### Kaggle Notebooks (recommended for long runs)
 
 1. New notebook → Settings → **Accelerator** `T4 x2` (or `P100`) and **Internet** on.
-2. Run these cells in order (the Kaggle CLI is already authenticated, so the
-   dataset needs no token; cloning into `/kaggle/temp` keeps the dataset out of
-   the saved output):
+2. Clone the code **inside `/kaggle/working`** (the only directory that survives the
+   session, so every artifact is kept in the Output tab). `main` only contains the README,
+   so pass the branch that holds the code with `--branch` (no need to change the
+   repository default branch):
 
 ```bash
-%cd /kaggle/temp
-!git clone https://github.com/oh-j-ruano-a-delgado/optimized-neural-network-tumor-segmentation.git
-%cd optimized-neural-network-tumor-segmentation
-!pip install -q numpy opencv-python h5py kaggle scikit-learn scipy matplotlib pandas pytest albumentations==2.0.8 segmentation-models-pytorch==0.6.0
-!python -m src.dataset.download_data
-!python -m scripts.train_baseline --epochs 40 --device auto --amp
-!cp -r runs/baseline /kaggle/working/
+%%bash
+set -e
+cd /kaggle/working
+git clone --branch develop --single-branch \
+  https://github.com/oh-j-ruano-a-delgado/optimized-neural-network-tumor-segmentation.git
+cd optimized-neural-network-tumor-segmentation
+pip install -q numpy opencv-python h5py kaggle scikit-learn scipy matplotlib pandas pytest albumentations==2.0.8 segmentation-models-pytorch==0.6.0
+python -m src.dataset.download_data
+python -m scripts.train_baseline --epochs 40 --device auto --amp
 ```
 
-Only `/kaggle/working` survives the session, hence the final copy. To run without
-keeping the tab open, use **Save & Run All (Commit)** (up to 12 hours).
+3. Hyperparameter search (genetic algorithm and its equal-budget random-search
+   reference). Both write their history JSON under `runs/`, so download them from the
+   notebook Output before the session ends:
+
+```bash
+%%bash
+set -e
+cd /kaggle/working/optimized-neural-network-tumor-segmentation
+python -m scripts.run_optimization --epochs 3 --device auto --amp
+python -m scripts.run_random_search --evaluations 46 --epochs 3 --device auto --amp
+```
+
+The default GA configuration (10 individuals, 5 generations, one elite) costs 46 fitness
+evaluations, so the random-search reference uses the same 46. `run_optimization` prints
+the command that retrains the winning configuration for the final model; it adds about
+one hour. To run without keeping the tab open, use **Save & Run All (Commit)**
+(12-hour limit per session, ~30 GPU-hours per week).
 
 ### Google Colab (interactive debugging)
 
@@ -143,6 +194,20 @@ from kaggle_secrets import UserSecretsClient
 token = UserSecretsClient().get_secret("GITHUB_TOKEN")
 !git clone https://{token}@github.com/oh-j-ruano-a-delgado/optimized-neural-network-tumor-segmentation.git
 ```
+
+## Hyperparameter optimization and comparison
+
+```bash
+python -m scripts.run_optimization --epochs 3                             # GA -> runs/optimization/best_hyperparameters.json
+python -m scripts.run_random_search --evaluations 46                      # equal-budget reference -> runs/random_search/
+python -m scripts.evaluate_test_set                                       # baseline vs optimized on the Testing split
+python -m scripts.plot_results                                            # figures and tables -> runs/comparison/
+```
+
+The winning genome is retrained for the final model with `scripts.train_baseline` (the
+optimization script prints the exact command). Pass `--evaluations` to the random search
+equal to the GA's `fitness_evaluations` (46 for the default configuration) for a fair
+reference curve.
 
 ## Tests
 
