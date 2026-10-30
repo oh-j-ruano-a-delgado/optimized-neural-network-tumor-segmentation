@@ -33,6 +33,8 @@ from ..dataset.transforms import DEFAULT_IMAGE_SIZE
 from ..models.factory import ModelSettings, build_model, settings_from_model_config
 
 PORTABLE_PATH_GLOBALS: Final[List[Tuple[Callable[..., Any], str]]] = [
+    (PurePosixPath, "pathlib.PurePosixPath"),
+    (PureWindowsPath, "pathlib.PureWindowsPath"),
     (PurePosixPath, "pathlib.PosixPath"),
     (PureWindowsPath, "pathlib.WindowsPath"),
     (PurePosixPath, "pathlib._local.PosixPath"),

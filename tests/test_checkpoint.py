@@ -48,7 +48,12 @@ def save_checkpoint(path: Path, model: UNet, output_dir: Any) -> None:
 
 @pytest.mark.parametrize(
     ("concrete_class", "expected_class"),
-    [(pathlib.PosixPath, PurePosixPath), (pathlib.WindowsPath, PureWindowsPath)],
+    [
+        (pathlib.PosixPath, PurePosixPath),
+        (pathlib.WindowsPath, PureWindowsPath),
+        (PurePosixPath, PurePosixPath),
+        (PureWindowsPath, PureWindowsPath),
+    ],
 )
 def test_foreign_concrete_paths_load_as_pure_paths(
     tmp_path: Path, concrete_class: Type[PurePath], expected_class: Type[PurePath]
