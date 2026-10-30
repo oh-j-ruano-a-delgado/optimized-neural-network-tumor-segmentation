@@ -99,12 +99,29 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "download_overlay": "Download overlay (PNG)",
                 "advanced_title": "Advanced settings",
                 "model_checkpoint_label": "Checkpoint",
-                "model_baseline": "Baseline (manual U-Net)",
-                "model_optimized": "Optimized (genetic algorithm)",
-                "optimized_missing": (
-                    "The optimized checkpoint is not available yet, so only the baseline "
-                    "can be selected."
+                "model_e": "E · U-Net from scratch",
+                "model_f": "F · ResNet34 U-Net (transfer)",
+                "model_e_desc": (
+                    "Trained from random initialization; the genetic algorithm chose its "
+                    "learning rate, weight decay, filters and depth."
                 ),
+                "model_f_desc": (
+                    "Starts from a ResNet34 encoder pre-trained on ImageNet and is fine-tuned "
+                    "on MRI slices."
+                ),
+                "model_missing": "Only the checkpoints present in `app/models` can be selected.",
+                "model_card_architecture": "Architecture: {architecture}",
+                "model_card_parameters": "Trainable parameters: {parameters}",
+                "model_card_test_dice": (
+                    "Held-out test Dice: {mean} mean · {whole} whole tumor"
+                ),
+                "model_card_training": "Training budget: {epochs} epochs · {minutes:.1f} min",
+                "challenging_suffix": "challenging case",
+                "challenging_hint": (
+                    "Challenging case: model F returns an empty mask here even though a small "
+                    "glioma is present. Switch to model E to see the difference."
+                ),
+                "inference_time": "Inference time: {seconds:.2f} s",
                 "overlay_opacity": "Highlight opacity",
                 "overlay_opacity_help": "How strongly the tumor colors cover the scan.",
                 "confidence_threshold": "Hide uncertain pixels",
@@ -122,14 +139,16 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 ),
                 "about_title": "About this demo",
                 "about_body": (
-                    "- The model segments three tumor types (meningioma, glioma, pituitary) "
-                    "plus background on 2D coronal slices of 256×256 pixels.\n"
+                    "- Two checkpoints are bundled. E is a custom U-Net trained from "
+                    "scratch; F is a U-Net with a ResNet34 encoder pre-trained on ImageNet "
+                    "(transfer learning) and is the default.\n"
+                    "- Both segment three tumor types (meningioma, glioma, pituitary) plus "
+                    "background on 2D coronal slices of 256×256 pixels.\n"
                     "- Dice and IoU exclude the background because tumor regions cover a "
                     "tiny part of each slice.\n"
                     "- The genetic algorithm tunes the learning rate, weight decay, number "
-                    "of filters and depth; this selector lets you compare the baseline "
-                    "with the optimized model.\n"
-                    "- The model is conservative and tends to miss small tumors; an empty "
+                    "of filters and depth of the from-scratch models.\n"
+                    "- The models are conservative and tend to miss small tumors; an empty "
                     "mask is not proof that the slice is healthy.\n"
                     "- Confidence is the maximum softmax probability on each pixel."
                 ),
@@ -227,12 +246,33 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "download_overlay": "Descargar superposición (PNG)",
                 "advanced_title": "Opciones avanzadas",
                 "model_checkpoint_label": "Checkpoint",
-                "model_baseline": "Baseline (U-Net manual)",
-                "model_optimized": "Optimizado (algoritmo genético)",
-                "optimized_missing": (
-                    "El checkpoint optimizado aún no está disponible, así que solo se puede "
-                    "elegir el baseline."
+                "model_e": "E · U-Net desde cero",
+                "model_f": "F · U-Net ResNet34 (transferencia)",
+                "model_e_desc": (
+                    "Entrenada desde inicialización aleatoria; el algoritmo genético eligió "
+                    "su tasa de aprendizaje, regularización, filtros y profundidad."
                 ),
+                "model_f_desc": (
+                    "Parte de un codificador ResNet34 preentrenado en ImageNet y se ajusta "
+                    "con cortes de resonancia."
+                ),
+                "model_missing": (
+                    "Solo se pueden elegir los checkpoints presentes en `app/models`."
+                ),
+                "model_card_architecture": "Arquitectura: {architecture}",
+                "model_card_parameters": "Parámetros entrenables: {parameters}",
+                "model_card_test_dice": (
+                    "Dice en test reservado: {mean} medio · {whole} tumor completo"
+                ),
+                "model_card_training": (
+                    "Presupuesto de entrenamiento: {epochs} épocas · {minutes:.1f} min"
+                ),
+                "challenging_suffix": "caso difícil",
+                "challenging_hint": (
+                    "Caso difícil: el modelo F devuelve una máscara vacía aunque hay un "
+                    "glioma pequeño. Cambia al modelo E para ver la diferencia."
+                ),
+                "inference_time": "Tiempo de inferencia: {seconds:.2f} s",
                 "overlay_opacity": "Opacidad del resaltado",
                 "overlay_opacity_help": "Cuánto cubren los colores del tumor a la resonancia.",
                 "confidence_threshold": "Ocultar píxeles poco seguros",
@@ -251,14 +291,16 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 ),
                 "about_title": "Sobre esta demo",
                 "about_body": (
-                    "- El modelo segmenta tres tipos de tumor (meningioma, glioma e "
-                    "hipófisis) y el fondo en cortes coronales 2D de 256×256 píxeles.\n"
+                    "- Se incluyen dos checkpoints. E es una U-Net propia entrenada desde "
+                    "cero; F es una U-Net con codificador ResNet34 preentrenado en ImageNet "
+                    "(transferencia de aprendizaje) y es la opción por defecto.\n"
+                    "- Ambas segmentan tres tipos de tumor (meningioma, glioma e hipófisis) "
+                    "y el fondo en cortes coronales 2D de 256×256 píxeles.\n"
                     "- Dice e IoU excluyen el fondo porque las regiones tumorales ocupan una "
                     "parte mínima de cada corte.\n"
                     "- El algoritmo genético ajusta la tasa de aprendizaje, la regularización, "
-                    "el número de filtros y la profundidad; este selector permite comparar el "
-                    "baseline con el modelo optimizado.\n"
-                    "- El modelo es conservador y tiende a no ver tumores pequeños; una "
+                    "el número de filtros y la profundidad de los modelos desde cero.\n"
+                    "- Los modelos son conservadores y tienden a no ver tumores pequeños; una "
                     "máscara vacía no prueba que el corte sea sano.\n"
                     "- La confianza es la probabilidad softmax máxima en cada píxel."
                 ),

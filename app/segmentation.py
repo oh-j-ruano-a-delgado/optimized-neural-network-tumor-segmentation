@@ -4,7 +4,7 @@ The module keeps every piece of inference logic free of Streamlit so it can be u
 tested on CPU and reused by future front ends.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Dict, Final, List, Mapping, Optional, Tuple
@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 import torch
 from numpy.typing import NDArray
-from torch import Tensor
+from torch import Tensor, nn
 
 from src.dataset.constants import BACKGROUND_LABEL, TUMOR_CLASS_NAMES
 from src.dataset.dataloader import read_image_file
@@ -23,7 +23,7 @@ from src.dataset.transforms import (
     build_evaluation_transform,
     to_grayscale,
 )
-from src.models.unet import UNet
+from src.models.factory import ModelSettings
 from src.utils.checkpoint import (
     TrainingCheckpoint,
     build_model_from_checkpoint,
@@ -35,20 +35,22 @@ PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 MODELS_DIR: Final[Path] = PROJECT_ROOT / "app" / "models"
 SAMPLES_DIR: Final[Path] = PROJECT_ROOT / "app" / "samples"
 
-BASELINE_MODEL_KEY: Final[str] = "baseline"
-OPTIMIZED_MODEL_KEY: Final[str] = "optimized"
+FROM_SCRATCH_MODEL_KEY: Final[str] = "e"
+TRANSFER_MODEL_KEY: Final[str] = "f"
+DEFAULT_MODEL_KEY: Final[str] = TRANSFER_MODEL_KEY
 MODEL_CHECKPOINTS: Final[Mapping[str, Path]] = MappingProxyType(
     {
-        BASELINE_MODEL_KEY: MODELS_DIR / "baseline_unet.pth",
-        OPTIMIZED_MODEL_KEY: MODELS_DIR / "optimized_unet.pth",
+        FROM_SCRATCH_MODEL_KEY: MODELS_DIR / "e_unet.pth",
+        TRANSFER_MODEL_KEY: MODELS_DIR / "f_smp_unet_fp16.pth",
     }
 )
 MODEL_LABELS: Final[Mapping[str, str]] = MappingProxyType(
     {
-        BASELINE_MODEL_KEY: "Baseline (manual U-Net)",
-        OPTIMIZED_MODEL_KEY: "Optimized (genetic algorithm)",
+        FROM_SCRATCH_MODEL_KEY: "E · U-Net trained from scratch",
+        TRANSFER_MODEL_KEY: "F · ResNet34 U-Net (transfer learning)",
     }
 )
+CHALLENGING_SAMPLE_STEMS: Final[frozenset[str]] = frozenset({"MR024780G_1922"})
 
 BACKGROUND_COLOR: Final[Tuple[int, int, int]] = (0, 0, 0)
 TUMOR_COLORS: Final[Mapping[int, Tuple[int, int, int]]] = MappingProxyType(
@@ -70,7 +72,7 @@ class SegmentationModel:
     key: str
     label: str
     checkpoint: TrainingCheckpoint
-    network: UNet
+    network: nn.Module
     device: torch.device
     transform: SegmentationTransform
 
@@ -78,6 +80,23 @@ class SegmentationModel:
     def image_size(self) -> ImageSize:
         side = self.checkpoint.image_size
         return side, side
+
+
+@dataclass(frozen=True)
+class OfflineMetrics:
+    test_mean_dice: float
+    test_whole_tumor_dice: float
+    training_epochs: int
+    training_minutes: float
+
+
+@dataclass(frozen=True)
+class ModelCard:
+    architecture: str
+    parameter_count: int
+    best_epoch: int
+    validation_dice: float
+    offline_metrics: Optional[OfflineMetrics]
 
 
 @dataclass(frozen=True)
@@ -98,6 +117,25 @@ class PreprocessedImage:
 class SampleImage:
     class_name: str
     path: Path
+    challenging: bool = False
+
+
+OFFLINE_METRICS: Final[Mapping[str, OfflineMetrics]] = MappingProxyType(
+    {
+        FROM_SCRATCH_MODEL_KEY: OfflineMetrics(
+            test_mean_dice=0.817545,
+            test_whole_tumor_dice=0.776214,
+            training_epochs=150,
+            training_minutes=78.1,
+        ),
+        TRANSFER_MODEL_KEY: OfflineMetrics(
+            test_mean_dice=0.824963,
+            test_whole_tumor_dice=0.765232,
+            training_epochs=100,
+            training_minutes=47.2,
+        ),
+    }
+)
 
 
 def available_models(
@@ -120,7 +158,7 @@ def load_model_from_checkpoint(
     device: Optional[torch.device] = None,
 ) -> SegmentationModel:
     resolved_device = resolve_device("auto") if device is None else device
-    checkpoint = load_training_checkpoint(checkpoint_path)
+    checkpoint = cast_state_dict_to_float32(load_training_checkpoint(checkpoint_path))
     network = build_model_from_checkpoint(checkpoint, resolved_device)
     side = checkpoint.image_size
     transform = build_evaluation_transform((side, side))
@@ -132,6 +170,38 @@ def load_model_from_checkpoint(
         device=resolved_device,
         transform=transform,
     )
+
+
+def cast_state_dict_to_float32(checkpoint: TrainingCheckpoint) -> TrainingCheckpoint:
+    floating_dtypes = {
+        tensor.dtype
+        for tensor in checkpoint.model_state_dict.values()
+        if tensor.is_floating_point()
+    }
+    if floating_dtypes <= {torch.float32}:
+        return checkpoint
+    float32_state_dict = {
+        name: tensor.float() if tensor.is_floating_point() else tensor
+        for name, tensor in checkpoint.model_state_dict.items()
+    }
+    return replace(checkpoint, model_state_dict=float32_state_dict)
+
+
+def build_model_card(model: SegmentationModel) -> ModelCard:
+    settings = model.checkpoint.model_settings
+    return ModelCard(
+        architecture=describe_architecture(settings),
+        parameter_count=sum(parameter.numel() for parameter in model.network.parameters()),
+        best_epoch=model.checkpoint.epoch,
+        validation_dice=model.checkpoint.validation_dice,
+        offline_metrics=OFFLINE_METRICS.get(model.key),
+    )
+
+
+def describe_architecture(settings: ModelSettings) -> str:
+    if settings.architecture == "smp_unet":
+        return f"SMP U-Net · {settings.encoder_name} encoder (ImageNet weights)"
+    return f"Custom U-Net · {settings.base_filters} base filters · depth {settings.depth}"
 
 
 def read_sample_image(image_path: Path) -> NDArray[np.generic]:
@@ -147,7 +217,11 @@ def decode_image_bytes(image_bytes: bytes) -> NDArray[np.generic]:
 
 def discover_sample_images(samples_dir: Path = SAMPLES_DIR) -> List[SampleImage]:
     return [
-        SampleImage(class_name=class_name, path=image_path)
+        SampleImage(
+            class_name=class_name,
+            path=image_path,
+            challenging=image_path.stem in CHALLENGING_SAMPLE_STEMS,
+        )
         for class_name in TUMOR_CLASS_NAMES.values()
         for image_path in sorted((samples_dir / class_name).glob("*.png"))
     ]

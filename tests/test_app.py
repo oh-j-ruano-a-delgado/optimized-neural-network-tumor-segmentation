@@ -17,14 +17,19 @@ from app.i18n import (
 )
 from app.segmentation import (
     BACKGROUND_LABEL,
+    CHALLENGING_SAMPLE_STEMS,
+    DEFAULT_MODEL_KEY,
+    FROM_SCRATCH_MODEL_KEY,
     MODEL_CHECKPOINTS,
     PROJECT_ROOT,
+    TRANSFER_MODEL_KEY,
     TUMOR_COLORS,
     apply_confidence_threshold,
     available_models,
     average_tumor_confidence,
     build_confidence_image,
     build_mask_image,
+    build_model_card,
     build_overlay,
     class_pixel_percentages,
     classify_confidence,
@@ -227,6 +232,14 @@ def test_bundled_samples_cover_every_tumor_class() -> None:
         assert image.dtype in (np.uint8, np.uint16)
 
 
+def test_challenging_sample_is_bundled_and_flagged() -> None:
+    challenging_samples = [sample for sample in discover_sample_images() if sample.challenging]
+    assert {sample.path.stem for sample in challenging_samples} == set(
+        CHALLENGING_SAMPLE_STEMS
+    )
+    assert all(sample.class_name == "glioma" for sample in challenging_samples)
+
+
 def test_read_sample_image_preserves_sixteen_bit_depth(tmp_path: Path) -> None:
     values = np.array([[0, 1200], [2400, 4000]], dtype=np.uint16)
     path = tmp_path / "sixteen_bit.png"
@@ -262,6 +275,44 @@ def test_bundled_checkpoints_are_loadable(model_key: str) -> None:
     assert result.mask.shape == (256, 256)
 
 
+def test_transfer_checkpoint_is_cast_to_float32() -> None:
+    model = load_model_from_checkpoint(
+        TRANSFER_MODEL_KEY,
+        MODEL_CHECKPOINTS[TRANSFER_MODEL_KEY],
+        device=torch.device("cpu"),
+    )
+    assert all(parameter.dtype == torch.float32 for parameter in model.network.parameters())
+
+
+def test_model_card_describes_each_bundled_model() -> None:
+    from_scratch = load_model_from_checkpoint(
+        FROM_SCRATCH_MODEL_KEY,
+        MODEL_CHECKPOINTS[FROM_SCRATCH_MODEL_KEY],
+        device=torch.device("cpu"),
+    )
+    transfer = load_model_from_checkpoint(
+        TRANSFER_MODEL_KEY,
+        MODEL_CHECKPOINTS[TRANSFER_MODEL_KEY],
+        device=torch.device("cpu"),
+    )
+
+    from_scratch_card = build_model_card(from_scratch)
+    transfer_card = build_model_card(transfer)
+
+    assert "Custom U-Net" in from_scratch_card.architecture
+    assert "resnet34" in transfer_card.architecture.lower()
+    assert from_scratch_card.parameter_count < transfer_card.parameter_count
+    assert from_scratch_card.offline_metrics is not None
+    assert transfer_card.offline_metrics is not None
+    assert transfer_card.best_epoch == transfer.checkpoint.epoch
+
+
+def test_model_card_without_offline_metrics(model) -> None:
+    card = build_model_card(model)
+    assert card.parameter_count > 0
+    assert card.offline_metrics is None
+
+
 def test_streamlit_app_renders_results_without_exceptions() -> None:
     app = AppTest.from_file(str(PROJECT_ROOT / "app" / "main.py"), default_timeout=180).run()
 
@@ -275,6 +326,35 @@ def test_streamlit_app_renders_results_without_exceptions() -> None:
         "Image source",
         "Checkpoint",
     }
+    checkpoint_selector = next(radio for radio in app.radio if radio.label == "Checkpoint")
+    assert checkpoint_selector.value == DEFAULT_MODEL_KEY
+
+
+def test_streamlit_app_shows_model_card_for_default_model() -> None:
+    app = AppTest.from_file(str(PROJECT_ROOT / "app" / "main.py"), default_timeout=180).run()
+
+    captions = " ".join(caption.value for caption in app.caption)
+
+    assert not app.exception
+    assert translate(ENGLISH, "model_card_test_dice").split("{")[0] in captions
+    assert translate(ENGLISH, "model_card_architecture").split("{")[0] in captions
+
+
+def test_streamlit_app_marks_challenging_sample() -> None:
+    app = AppTest.from_file(str(PROJECT_ROOT / "app" / "main.py"), default_timeout=180).run()
+
+    challenging_suffix = translate(ENGLISH, "challenging_suffix")
+    challenging_index = next(
+        index
+        for index, option in enumerate(app.selectbox[0].options)
+        if challenging_suffix in option
+    )
+    app.selectbox[0].set_value(challenging_index).run()
+
+    assert not app.exception
+    assert any(
+        translate(ENGLISH, "challenging_hint") in warning.value for warning in app.warning
+    )
 
 
 def test_streamlit_app_switches_to_spanish() -> None:

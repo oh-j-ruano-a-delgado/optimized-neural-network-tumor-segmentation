@@ -78,7 +78,7 @@ access; evaluating a saved checkpoint does not.
 
 Local experiment archive (`runs/` is gitignored): runs are grouped by phase and numbered in
 chronological order, e.g. `runs/baseline_vs_ga/02_A_ga_optimized/` or
-`runs/phase6_capacity_and_lr_schedule/10_E_ultimate_unet/`. The evaluation and plotting scripts
+`runs/capacity_and_lr_schedule/10_E_ultimate_unet/`. The evaluation and plotting scripts
 default to the Phase 4 folders of this layout.
 
 ## Interface (Streamlit)
@@ -89,21 +89,26 @@ predicted mask and per-pixel confidence map) and read a plain-language interpret
 with the detected tumor type, its share of the slice and how confident the model is.
 Nine slices from the held-out Testing split ship with the repository under
 `app/samples/`, so the app can be tried without uploading anything, while any PNG in
-the same domain can also be uploaded. Technical controls (checkpoint selection, overlay
-opacity, confidence threshold) live in a collapsed "Advanced settings" section.
+the same domain can also be uploaded. One glioma slice is labelled as a *challenging
+case* where the transfer-learning model returns an empty mask. Technical controls
+(checkpoint selection, overlay opacity, confidence threshold) live in a collapsed
+"Advanced settings" section, which also shows a model card (architecture, parameter
+count, held-out test Dice, training budget and inference time).
 
 ```bash
 pip install -r requirements.txt
 streamlit run app/main.py
 ```
 
-The app ships two checkpoints: `app/models/baseline_unet.pth` (manually tuned
-baseline) and `app/models/optimized_unet.pth` (genetic-algorithm winner). Both appear in
-the "Advanced settings" checkpoint selector, which defaults to the optimized one. To
-refresh a checkpoint, copy a trained `runs/.../best_model.pth` over it:
+The app ships two checkpoints: `app/models/e_unet.pth` (model E, custom U-Net trained
+from scratch) and `app/models/f_smp_unet_fp16.pth` (model F, U-Net with a ResNet34
+encoder pre-trained on ImageNet, stored in half precision and cast to float32 at load
+time). Both appear in the "Advanced settings" checkpoint selector, which defaults to F.
+To refresh a checkpoint, copy a trained `runs/.../best_model.pth` over it:
 
 ```bash
-cp runs/optimized/best_model.pth app/models/optimized_unet.pth
+cp runs/capacity_and_lr_schedule/10_E_ultimate_unet/best_model.pth app/models/e_unet.pth
+python -m scripts.export_checkpoint_fp16 --checkpoint runs/transfer_learning/13_F_smp_unet_resnet34/best_model.pth --output app/models/f_smp_unet_fp16.pth
 ```
 
 ### Deploy on Streamlit Community Cloud

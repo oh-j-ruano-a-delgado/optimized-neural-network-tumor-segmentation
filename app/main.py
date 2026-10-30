@@ -1,7 +1,12 @@
-"""Bilingual Streamlit demo that segments a preprocessed MRI slice with the trained U-Net."""
+"""Bilingual Streamlit demo that segments a preprocessed MRI slice with the trained U-Net.
+
+Streamlit only adds the entry script directory to ``sys.path``; the repository root is
+inserted below so both ``src`` and ``app`` imports resolve locally and on Streamlit Cloud.
+"""
 
 import math
 import sys
+import time
 from functools import partial
 from pathlib import Path
 from typing import Callable, Final, List, Mapping, Optional, Sequence, Tuple
@@ -12,8 +17,6 @@ import streamlit as st
 from numpy.typing import NDArray
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
-# Streamlit only adds the entry script directory to sys.path; the repository
-# root is required so both `src` and `app` imports resolve locally and on Cloud.
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -24,8 +27,8 @@ from app.i18n import (
 )
 from app.segmentation import (
     DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_MODEL_KEY,
     DEFAULT_OVERLAY_ALPHA,
-    OPTIMIZED_MODEL_KEY,
     TUMOR_CLASS_NAMES,
     TUMOR_COLORS,
     SampleImage,
@@ -35,6 +38,7 @@ from app.segmentation import (
     average_tumor_confidence,
     build_confidence_image,
     build_mask_image,
+    build_model_card,
     build_overlay,
     class_pixel_percentages,
     classify_confidence,
@@ -69,9 +73,14 @@ def format_validation_dice(value: float) -> str:
     return "n/a" if math.isnan(value) else f"{value:.4f}"
 
 
+def format_parameter_count(parameter_count: int) -> str:
+    return f"{parameter_count / 1_000_000:.2f} M"
+
+
 def format_sample_label(sample: SampleImage, t: Translator) -> str:
     class_display = t(f"class_{sample.class_name}")
-    return f"{class_display} — {sample.path.stem}"
+    label = f"{class_display} — {sample.path.stem}"
+    return f"{label} · {t('challenging_suffix')}" if sample.challenging else label
 
 
 def render_header() -> Translator:
@@ -118,6 +127,8 @@ def render_image_source(t: Translator) -> Tuple[NDArray[np.uint8], Optional[str]
         )
         selected_sample = samples[selected_index]
         st.caption(t(f"class_{selected_sample.class_name}_desc"))
+        if selected_sample.challenging:
+            st.warning(t("challenging_hint"))
         st.caption(t("examples_hint"))
         return read_sample_image(selected_sample.path), selected_sample.class_name
 
@@ -133,10 +144,13 @@ def render_image_source(t: Translator) -> Tuple[NDArray[np.uint8], Optional[str]
 def render_advanced_settings(t: Translator, availability: Mapping[str, bool]) -> Tuple:
     available_keys = [key for key, present in availability.items() if present]
     default_key = (
-        OPTIMIZED_MODEL_KEY if availability.get(OPTIMIZED_MODEL_KEY) else available_keys[0]
+        DEFAULT_MODEL_KEY
+        if availability.get(DEFAULT_MODEL_KEY)
+        else available_keys[0]
     )
 
-    with st.expander(t("advanced_title")):
+    with st.sidebar:
+        st.subheader(t("advanced_title"))
         model_key = st.radio(
             t("model_checkpoint_label"),
             available_keys,
@@ -144,8 +158,9 @@ def render_advanced_settings(t: Translator, availability: Mapping[str, bool]) ->
             format_func=lambda key: t(f"model_{key}"),
             horizontal=True,
         )
-        if not availability.get(OPTIMIZED_MODEL_KEY):
-            st.caption(t("optimized_missing"))
+        st.caption(t(f"model_{model_key}_desc"))
+        if not all(availability.values()):
+            st.caption(t("model_missing"))
         overlay_alpha = st.slider(
             t("overlay_opacity"),
             *OVERLAY_ALPHA_RANGE,
@@ -161,15 +176,38 @@ def render_advanced_settings(t: Translator, availability: Mapping[str, bool]) ->
             help=t("confidence_threshold_help"),
         )
         model = get_model(model_key)
-        checkpoint = model.checkpoint
+        render_model_card(t, model)
+    return model_key, overlay_alpha, confidence_threshold
+
+
+def render_model_card(t: Translator, model: SegmentationModel) -> None:
+    card = build_model_card(model)
+    st.caption(
+        t("checkpoint_summary").format(
+            epoch=card.best_epoch,
+            dice=format_validation_dice(card.validation_dice),
+            device=model.device.type,
+        )
+    )
+    st.caption(t("model_card_architecture").format(architecture=card.architecture))
+    st.caption(
+        t("model_card_parameters").format(
+            parameters=format_parameter_count(card.parameter_count)
+        )
+    )
+    if card.offline_metrics is not None:
         st.caption(
-            t("checkpoint_summary").format(
-                epoch=checkpoint.epoch,
-                dice=format_validation_dice(checkpoint.validation_dice),
-                device=model.device.type,
+            t("model_card_test_dice").format(
+                mean=f"{card.offline_metrics.test_mean_dice:.4f}",
+                whole=f"{card.offline_metrics.test_whole_tumor_dice:.4f}",
             )
         )
-    return model_key, overlay_alpha, confidence_threshold
+        st.caption(
+            t("model_card_training").format(
+                epochs=card.offline_metrics.training_epochs,
+                minutes=card.offline_metrics.training_minutes,
+            )
+        )
 
 
 def render_legend(t: Translator) -> None:
@@ -211,6 +249,7 @@ def render_interpretation(
     mask: NDArray[np.uint8],
     confidence: NDArray[np.float32],
     ground_truth_class: Optional[str],
+    inference_seconds: float,
 ) -> None:
     st.subheader(t("step3_title"))
     dominant_class = dominant_class_name(mask)
@@ -238,6 +277,7 @@ def render_interpretation(
         st.caption(
             t("ground_truth").format(label=t(f"class_{ground_truth_class}"))
         )
+    st.caption(t("inference_time").format(seconds=inference_seconds))
 
 
 def render_statistics(t: Translator, mask: NDArray[np.uint8]) -> None:
@@ -282,7 +322,9 @@ def main() -> None:
     if not any(availability.values()):
         st.error(
             "No trained checkpoint was found in `app/models`. Copy "
-            "`runs/baseline/best_model.pth` to `app/models/baseline_unet.pth` first."
+            "`runs/capacity_and_lr_schedule/10_E_ultimate_unet/best_model.pth` to "
+            "`app/models/e_unet.pth` and export F with "
+            "`scripts/export_checkpoint_fp16.py` first."
         )
         st.stop()
 
@@ -292,7 +334,9 @@ def main() -> None:
     model = get_model(model_key)
     with st.spinner(t("running_inference")):
         preprocessed = preprocess_image(image, model)
+        started_at = time.perf_counter()
         prediction = predict(model, preprocessed.tensor)
+        inference_seconds = time.perf_counter() - started_at
     mask = apply_confidence_threshold(
         prediction.mask, prediction.confidence, confidence_threshold
     )
@@ -300,7 +344,9 @@ def main() -> None:
     overlay = render_views(
         t, preprocessed.display_image, mask, prediction.confidence, overlay_alpha
     )
-    render_interpretation(t, mask, prediction.confidence, ground_truth_class)
+    render_interpretation(
+        t, mask, prediction.confidence, ground_truth_class, inference_seconds
+    )
     st.subheader(t("coverage_title"))
     render_statistics(t, mask)
     render_downloads(t, build_mask_image(mask), overlay)
