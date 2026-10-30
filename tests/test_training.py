@@ -7,6 +7,10 @@ N epochs after the best one, never earlier, and a missing patience disables earl
 The learning-rate schedule tests step a real Adam optimizer once per epoch and check the cosine
 curve at its start, midpoint and end (base rate, half the base rate, zero) against the closed
 form, and that the constant schedule returns no scheduler at all.
+The optimizer tests check that the default multiplier keeps one parameter group, that any other
+multiplier gives the pretrained encoder of the SMP U-Net (built offline, without ImageNet weights)
+its own group at the scaled rate, that the cosine schedule keeps that ratio while annealing, and
+that the custom U-Net or a non-positive multiplier is rejected.
 """
 
 import math
@@ -15,6 +19,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
+from src.models.factory import ModelSettings, build_model
 from src.models.losses import DiceFocalLoss
 from src.models.unet import UNet
 from src.utils.metrics import SegmentationMetrics
@@ -22,6 +27,7 @@ from src.utils.training import (
     LEARNING_RATE_SCHEDULES,
     build_grad_scaler,
     build_learning_rate_scheduler,
+    build_optimizer,
     current_learning_rate,
     evaluate_epoch,
     resolve_amp_mode,
@@ -30,6 +36,7 @@ from src.utils.training import (
     should_stop_early,
     train_epoch,
     validate_early_stopping_patience,
+    validate_encoder_lr_multiplier,
 )
 
 
@@ -140,19 +147,19 @@ def test_early_stopping_rejects_non_positive_patience(patience: int) -> None:
         should_stop_early(current_epoch=10, best_epoch=1, patience=patience)
 
 
-def build_optimizer(learning_rate: float = 1e-3) -> torch.optim.Optimizer:
+def build_single_parameter_optimizer(learning_rate: float = 1e-3) -> torch.optim.Optimizer:
     return torch.optim.Adam([torch.nn.Parameter(torch.zeros(1))], lr=learning_rate)
 
 
 def test_constant_schedule_returns_no_scheduler() -> None:
-    optimizer = build_optimizer()
+    optimizer = build_single_parameter_optimizer()
     assert build_learning_rate_scheduler(optimizer, "constant", total_epochs=10) is None
     assert current_learning_rate(optimizer) == pytest.approx(1e-3)
 
 
 def test_cosine_schedule_follows_half_a_cosine_period() -> None:
     base_rate, total_epochs = 1e-3, 150
-    optimizer = build_optimizer(base_rate)
+    optimizer = build_single_parameter_optimizer(base_rate)
     scheduler = build_learning_rate_scheduler(optimizer, "cosine", total_epochs)
     rates = []
     for _ in range(total_epochs):
@@ -170,7 +177,7 @@ def test_cosine_schedule_follows_half_a_cosine_period() -> None:
 
 
 def test_cosine_schedule_decreases_monotonically() -> None:
-    optimizer = build_optimizer()
+    optimizer = build_single_parameter_optimizer()
     scheduler = build_learning_rate_scheduler(optimizer, "cosine", total_epochs=20)
     rates = []
     for _ in range(20):
@@ -186,9 +193,66 @@ def test_schedule_names_are_constant_and_cosine() -> None:
 
 def test_unknown_schedule_is_rejected() -> None:
     with pytest.raises(ValueError, match="Unknown learning-rate schedule"):
-        build_learning_rate_scheduler(build_optimizer(), "step", total_epochs=10)
+        build_learning_rate_scheduler(build_single_parameter_optimizer(), "step", total_epochs=10)
 
 
 def test_schedule_rejects_non_positive_epochs() -> None:
     with pytest.raises(ValueError, match="total_epochs"):
-        build_learning_rate_scheduler(build_optimizer(), "cosine", total_epochs=0)
+        build_learning_rate_scheduler(build_single_parameter_optimizer(), "cosine", total_epochs=0)
+
+
+def build_smp_unet() -> torch.nn.Module:
+    return build_model(ModelSettings(architecture="smp_unet", encoder_name="resnet34"))
+
+
+def test_default_optimizer_has_one_parameter_group() -> None:
+    model = build_smp_unet()
+    optimizer = build_optimizer(model, learning_rate=1e-3, weight_decay=1e-5)
+    assert len(optimizer.param_groups) == 1
+    assert optimizer.param_groups[0]["lr"] == pytest.approx(1e-3)
+    assert optimizer.param_groups[0]["weight_decay"] == pytest.approx(1e-5)
+    assert len(optimizer.param_groups[0]["params"]) == len(list(model.parameters()))
+
+
+def test_encoder_multiplier_gives_the_encoder_a_scaled_learning_rate() -> None:
+    model = build_smp_unet()
+    optimizer = build_optimizer(
+        model, learning_rate=3e-4, weight_decay=1e-5, encoder_lr_multiplier=0.1
+    )
+    decoder_group, encoder_group = optimizer.param_groups
+    assert decoder_group["lr"] == pytest.approx(3e-4)
+    assert encoder_group["lr"] == pytest.approx(3e-5)
+    assert decoder_group["weight_decay"] == encoder_group["weight_decay"] == pytest.approx(1e-5)
+    assert {id(parameter) for parameter in encoder_group["params"]} == {
+        id(parameter) for parameter in model.encoder.parameters()
+    }
+    assert current_learning_rate(optimizer) == pytest.approx(3e-4)
+
+
+def test_cosine_schedule_keeps_the_encoder_to_decoder_ratio() -> None:
+    optimizer = build_optimizer(
+        build_smp_unet(), learning_rate=3e-4, weight_decay=0.0, encoder_lr_multiplier=0.1
+    )
+    scheduler = build_learning_rate_scheduler(optimizer, "cosine", total_epochs=10)
+    for _ in range(4):
+        optimizer.step()
+        scheduler.step()
+    decoder_group, encoder_group = optimizer.param_groups
+    assert 0.0 < decoder_group["lr"] < 3e-4
+    assert encoder_group["lr"] == pytest.approx(0.1 * decoder_group["lr"])
+
+
+def test_encoder_multiplier_is_rejected_for_the_custom_unet() -> None:
+    with pytest.raises(ValueError, match="no pretrained encoder"):
+        build_optimizer(
+            UNet(base_filters=4, depth=2),
+            learning_rate=1e-3,
+            weight_decay=0.0,
+            encoder_lr_multiplier=0.1,
+        )
+
+
+@pytest.mark.parametrize("multiplier", [0.0, -0.1, math.nan, math.inf])
+def test_non_positive_or_non_finite_multiplier_is_rejected(multiplier: float) -> None:
+    with pytest.raises(ValueError, match="multiplier"):
+        validate_encoder_lr_multiplier(multiplier)

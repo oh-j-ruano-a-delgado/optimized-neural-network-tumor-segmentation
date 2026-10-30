@@ -1,9 +1,10 @@
-"""Evaluate the baseline and GA-optimized U-Net checkpoints on the held-out Testing split.
+"""Evaluate two segmentation checkpoints against each other on the held-out Testing split.
 
 Neither model saw the Testing split during training, checkpoint selection or the genetic
-search, so this is the unbiased comparison for Phase 4. Each checkpoint is rebuilt from its own
-stored architecture and preprocessed with the deterministic evaluation transform at the image
-size it was trained with. Dice and IoU are accumulated over every test pixel (the same global
+search, so this is the unbiased comparison (Phase 4 onwards). Each checkpoint is rebuilt from its
+own stored architecture, either the custom U-Net or the SMP U-Net with a pretrained encoder (see
+``src/models/factory.py``), and preprocessed with the deterministic evaluation transform at the
+image size it was trained with. Dice and IoU are accumulated over every test pixel (the same global
 aggregation used for validation) and reported per tumor class, as their macro mean over the
 three classes (the validation metric), and for the whole tumor, where every tumor class is
 merged into one foreground label so localization quality can be told apart from tumor-type
@@ -11,14 +12,16 @@ confusion.
 
 The two checkpoints are reported under ``--reference-name`` and ``--challenger-name`` (default
 "baseline" and "optimized", the Phase 4 pair that ``scripts/plot_results.py`` styles). Later
-comparisons, such as the GA-optimized Run A against the Phase 6 Run E, pass their own names so
-the tables and the JSON never mislabel a run; the names must differ because they key the JSON.
+comparisons, such as the GA-optimized Run A against the Phase 6 Run E or Run E against the
+Phase 7 transfer-learning Run F, pass their own names so the tables and the JSON never mislabel a
+run; the names must differ because they key the JSON. The line printed for each checkpoint names
+its architecture: filters and depth for the custom U-Net, the encoder for the SMP U-Net.
 
 Outputs (in ``--output-dir``):
     test_metrics.csv   tidy table (model, region, dice, iou) consumed by scripts/plot_results.py
     test_metrics.json  the same scores plus checkpoint metadata and test-set composition
 
-Usage (from the project root; P4 = runs/phase4_baseline_vs_ga):
+Usage (from the project root; P4 = runs/baseline_vs_ga):
     python -m scripts.evaluate_test_set [--baseline-checkpoint P4/01_baseline_manual/best_model.pth]
         [--optimized-checkpoint P4/02_A_ga_optimized/best_model.pth]
         [--device auto|cpu|cuda] [--amp] [--batch-size 8]
@@ -55,6 +58,7 @@ from src.dataset.dataloader import (
     discover_samples,
 )
 from src.dataset.transforms import build_evaluation_transform
+from src.models.factory import describe_model
 from src.utils.checkpoint import (
     TrainingCheckpoint,
     build_model_from_checkpoint,
@@ -289,8 +293,7 @@ def describe_checkpoint(evaluation: ModelEvaluation) -> str:
         f"validation Dice {checkpoint.validation_dice:.4f} | "
         f"lr {hyperparameters.get('learning_rate', float('nan')):.3g} | "
         f"wd {hyperparameters.get('weight_decay', float('nan')):.3g} | "
-        f"filters {checkpoint.model_config['base_filters']} | "
-        f"depth {checkpoint.model_config['depth']} | "
+        f"{describe_model(checkpoint.model_settings)} | "
         f"evaluated in {evaluation.evaluation_seconds:.1f}s"
     )
 

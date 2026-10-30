@@ -19,12 +19,25 @@ to zero over exactly ``--epochs`` epochs (``CosineAnnealingLR(optimizer, T_max=e
 once per epoch). The rate used in each epoch is written to the ``learning_rate`` column of
 ``history.csv`` so the schedule can be verified after a run.
 
+``--model`` selects the network from ``src/models/factory.py``: "unet" (default, the custom U-Net
+sized by ``--base-filters`` and ``--depth``) or "smp_unet" (the segmentation_models_pytorch U-Net
+with the pretrained encoder named by ``--encoder``, default resnet34, Phase 7). Options that do
+not apply to the selected network are ignored. ``--encoder-weights`` is "imagenet" (default) or
+"none"; "none" trains the same SMP network from random initialization, the control that separates
+the effect of pretraining from that of the architecture. ``--encoder-lr-multiplier`` scales the
+learning rate of the pretrained encoder relative to ``--learning-rate``, which keeps applying to
+the decoder and segmentation head. The default of 1 trains the whole model at one rate, as in
+Phases 2-6, and only "smp_unet" accepts other values. The checkpoint config records the
+architecture, so the evaluation scripts rebuild either network from it.
+
 Usage (from the project root):
     python -m scripts.train_baseline --epochs 40 [--device auto|cpu|cuda] [--amp] [--output-dir runs/baseline]
         [--augmentation none|basic|advanced_spatial|advanced_intensity|advanced]
         [--loss dice_focal|focal_tversky_focal|dice_ce]
         [--tversky-alpha 0.7] [--tversky-beta 0.3] [--tversky-gamma 1.3333]
         [--early-stopping-patience 20] [--lr-schedule constant|cosine]
+        [--model unet|smp_unet] [--encoder resnet34] [--encoder-weights imagenet|none]
+        [--encoder-lr-multiplier 0.1]
 """
 
 import argparse
@@ -34,10 +47,23 @@ from pathlib import Path
 from typing import Dict, Final, List, Sequence
 
 import torch
+from torch import nn
 
 from src.dataset.constants import NUM_CLASSES, TUMOR_CLASS_NAMES
 from src.dataset.dataloader import get_dataloaders
 from src.dataset.transforms import AUGMENTATION_PRESETS, DEFAULT_AUGMENTATION_PRESET
+from src.models.factory import (
+    DEFAULT_ENCODER_NAME,
+    DEFAULT_ENCODER_WEIGHTS,
+    DEFAULT_MODEL_ARCHITECTURE,
+    ENCODER_WEIGHTS,
+    MODEL_ARCHITECTURES,
+    ModelSettings,
+    build_model,
+    describe_model,
+    model_config,
+    resolve_encoder_weights,
+)
 from src.models.losses import (
     DEFAULT_DICE_WEIGHT,
     DEFAULT_FOCAL_GAMMA,
@@ -50,22 +76,25 @@ from src.models.losses import (
     LossSettings,
     build_criterion,
 )
-from src.models.unet import UNet, count_parameters
+from src.models.unet import DEFAULT_IN_CHANNELS, count_parameters
 from src.utils.metrics import SegmentationMetrics, SegmentationReport
 from src.utils.training import (
     build_grad_scaler,
     evaluate_epoch,
     resolve_amp_mode,
     resolve_device,
+    DEFAULT_ENCODER_LR_MULTIPLIER,
     DEFAULT_LEARNING_RATE_SCHEDULE,
     LEARNING_RATE_SCHEDULES,
     build_learning_rate_scheduler,
+    build_optimizer,
     current_learning_rate,
     resolve_max_batches,
     set_global_seed,
     should_stop_early,
     train_epoch,
     validate_early_stopping_patience,
+    validate_encoder_lr_multiplier,
 )
 
 DEFAULT_EPOCHS: Final[int] = 40
@@ -87,6 +116,14 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--learning-rate", type=float, default=DEFAULT_LEARNING_RATE)
     parser.add_argument("--weight-decay", type=float, default=DEFAULT_WEIGHT_DECAY)
+    parser.add_argument("--model", choices=MODEL_ARCHITECTURES, default=DEFAULT_MODEL_ARCHITECTURE)
+    parser.add_argument("--encoder", default=DEFAULT_ENCODER_NAME)
+    parser.add_argument(
+        "--encoder-weights", choices=ENCODER_WEIGHTS, default=DEFAULT_ENCODER_WEIGHTS
+    )
+    parser.add_argument(
+        "--encoder-lr-multiplier", type=float, default=DEFAULT_ENCODER_LR_MULTIPLIER
+    )
     parser.add_argument("--base-filters", type=int, default=16)
     parser.add_argument("--depth", type=int, default=4)
     parser.add_argument("--image-size", type=int, default=DEFAULT_IMAGE_SIZE)
@@ -124,6 +161,17 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--amp", action="store_true")
     return parser.parse_args()
+
+
+def build_model_settings(arguments: argparse.Namespace) -> ModelSettings:
+    return ModelSettings(
+        architecture=arguments.model,
+        in_channels=DEFAULT_IN_CHANNELS,
+        num_classes=NUM_CLASSES,
+        base_filters=arguments.base_filters,
+        depth=arguments.depth,
+        encoder_name=arguments.encoder,
+    )
 
 
 def build_loss_settings(arguments: argparse.Namespace) -> LossSettings:
@@ -190,17 +238,17 @@ def write_history_csv(path: Path, fieldnames: Sequence[str], rows: Sequence[Dict
 
 
 def save_checkpoint(
-    path: Path, model: UNet, arguments: argparse.Namespace, epoch: int, validation_dice: float
+    path: Path,
+    model: nn.Module,
+    model_settings: ModelSettings,
+    arguments: argparse.Namespace,
+    epoch: int,
+    validation_dice: float,
 ) -> None:
     torch.save(
         {
             "model_state_dict": model.state_dict(),
-            "config": {
-                "in_channels": model.in_channels,
-                "num_classes": model.num_classes,
-                "base_filters": model.base_filters,
-                "depth": model.depth,
-            },
+            "config": model_config(model_settings),
             "epoch": epoch,
             "validation_dice": validation_dice,
             "arguments": vars(arguments),
@@ -221,6 +269,7 @@ def describe_history_row(row: Dict[str, object], total_epochs: int) -> str:
 def main() -> None:
     arguments = parse_arguments()
     validate_early_stopping_patience(arguments.early_stopping_patience)
+    validate_encoder_lr_multiplier(arguments.encoder_lr_multiplier)
     set_global_seed(arguments.seed)
     device = resolve_device(arguments.device)
     amp_enabled = resolve_amp_mode(arguments.amp, device)
@@ -245,16 +294,19 @@ def main() -> None:
         f"test {len(dataloaders.test.dataset)} samples"
     )
 
-    model = UNet(
-        num_classes=NUM_CLASSES,
-        base_filters=arguments.base_filters,
-        depth=arguments.depth,
-    ).to(device)
+    model_settings = build_model_settings(arguments)
+    encoder_weights = resolve_encoder_weights(arguments.model, arguments.encoder_weights)
+    model = build_model(model_settings, encoder_weights).to(device)
+    print(
+        f"Model: {describe_model(model_settings)} | "
+        f"pretrained encoder weights {encoder_weights or 'none'} | "
+        f"encoder lr multiplier {arguments.encoder_lr_multiplier:g}"
+    )
     print(f"Model parameters: {count_parameters(model):,}")
 
     criterion = build_criterion(build_loss_settings(arguments), NUM_CLASSES).to(device)
-    optimizer = torch.optim.Adam(
-        model.parameters(), lr=arguments.learning_rate, weight_decay=arguments.weight_decay
+    optimizer = build_optimizer(
+        model, arguments.learning_rate, arguments.weight_decay, arguments.encoder_lr_multiplier
     )
     scheduler = build_learning_rate_scheduler(optimizer, arguments.lr_schedule, arguments.epochs)
     metrics = SegmentationMetrics(num_classes=NUM_CLASSES)
@@ -305,7 +357,7 @@ def main() -> None:
         if report.mean_dice > best_dice:
             best_dice = report.mean_dice
             best_epoch = epoch
-            save_checkpoint(checkpoint_path, model, arguments, epoch, best_dice)
+            save_checkpoint(checkpoint_path, model, model_settings, arguments, epoch, best_dice)
 
         if should_stop_early(epoch, best_epoch, arguments.early_stopping_patience):
             print(
