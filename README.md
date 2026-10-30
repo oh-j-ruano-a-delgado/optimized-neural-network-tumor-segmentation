@@ -81,6 +81,30 @@ chronological order, e.g. `runs/baseline_vs_ga/02_A_ga_optimized/` or
 `runs/capacity_and_lr_schedule/10_E_ultimate_unet/`. The evaluation and plotting scripts
 default to the Phase 4 folders of this layout.
 
+## Optimization analysis
+
+```bash
+python -m scripts.run_optimization --epochs 3     # GA -> runs/optimization/best_hyperparameters.json
+python -m scripts.plot_optimization               # convergence and budget-comparison figures
+```
+
+`scripts.plot_optimization` writes `ga_convergence.png` and `ga_fitness_by_generation.png`
+to `runs/optimization/figures/`, plus `budget_comparison.png` once an equal-budget
+random-search JSON exists under `runs/random_search/`. `scripts.run_optimization` prints
+the exact retraining command for the winning genome; retrain it with
+`scripts.train_baseline`.
+
+## Evaluation
+
+```bash
+python -m scripts.evaluate_test_set   # pixel-pooled Dice/IoU + per-slice detection metrics
+python -m scripts.plot_results        # figures and tables -> runs/comparison/
+```
+
+Besides `test_metrics.csv/json`, the evaluation writes `test_slices.csv` (one row per
+slice) and `test_slice_metrics.json` (detection rate, missed tumors and per-slice Dice
+percentiles per model), so small-lesion behaviour is visible next to the pooled scores.
+
 ## Interface (Streamlit)
 
 An interactive, bilingual (English/Spanish) demo that guides visitors through three
@@ -90,10 +114,8 @@ with the detected tumor type, its share of the slice and how confident the model
 Nine slices from the held-out Testing split ship with the repository under
 `app/samples/`, so the app can be tried without uploading anything, while any PNG in
 the same domain can also be uploaded. One glioma slice is labelled as a *challenging
-case* where the transfer-learning model returns an empty mask. Technical controls
-(checkpoint selection, overlay opacity, confidence threshold) live in a collapsed
-"Advanced settings" section, which also shows a model card (architecture, parameter
-count, held-out test Dice, training budget and inference time).
+case* where the transfer-learning model returns an empty mask. The model selector,
+settings and model card live in the sidebar.
 
 ```bash
 pip install -r requirements.txt
@@ -103,8 +125,8 @@ streamlit run app/main.py
 The app ships two checkpoints: `app/models/e_unet.pth` (model E, custom U-Net trained
 from scratch) and `app/models/f_smp_unet_fp16.pth` (model F, U-Net with a ResNet34
 encoder pre-trained on ImageNet, stored in half precision and cast to float32 at load
-time). Both appear in the "Advanced settings" checkpoint selector, which defaults to F.
-To refresh a checkpoint, copy a trained `runs/.../best_model.pth` over it:
+time). Both appear in the sidebar checkpoint selector, which defaults to F. To refresh
+a checkpoint, copy a trained `runs/.../best_model.pth` over it:
 
 ```bash
 cp runs/capacity_and_lr_schedule/10_E_ultimate_unet/best_model.pth app/models/e_unet.pth
@@ -117,7 +139,7 @@ python -m scripts.export_checkpoint_fp16 --checkpoint runs/transfer_learning/13_
 2. Sign in at <https://share.streamlit.io> with GitHub and click **New app**.
 3. Select the repository and the branch that contains the interface (or `develop` once
    it is merged), set the main file to `app/main.py` and deploy. Streamlit installs
-    `requirements.txt` automatically; no secrets are required.
+   `requirements.txt` automatically; no secrets are required.
 
 ## Cloud training (Kaggle / Colab)
 

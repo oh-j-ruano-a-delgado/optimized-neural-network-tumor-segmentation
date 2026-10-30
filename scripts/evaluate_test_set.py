@@ -18,8 +18,10 @@ run; the names must differ because they key the JSON. The line printed for each 
 its architecture: filters and depth for the custom U-Net, the encoder for the SMP U-Net.
 
 Outputs (in ``--output-dir``):
-    test_metrics.csv   tidy table (model, region, dice, iou) consumed by scripts/plot_results.py
-    test_metrics.json  the same scores plus checkpoint metadata and test-set composition
+    test_metrics.csv        tidy table (model, region, dice, iou) read by scripts/plot_results.py
+    test_metrics.json       the same scores plus checkpoint metadata and test-set composition
+    test_slices.csv         one row per slice (model, sample, class, dice, precision, recall, ...)
+    test_slice_metrics.json per-model detection rate, missed tumors and per-slice Dice summary
 
 Usage (from the project root; P4 = runs/baseline_vs_ga):
     python -m scripts.evaluate_test_set [--baseline-checkpoint P4/01_baseline_manual/best_model.pth]
@@ -65,6 +67,12 @@ from src.utils.checkpoint import (
     load_training_checkpoint,
 )
 from src.utils.metrics import SegmentationMetrics, SegmentationReport
+from src.utils.slice_metrics import (
+    SliceScore,
+    SliceSummary,
+    score_slice,
+    summarize_slices,
+)
 from src.utils.training import resolve_amp_mode, resolve_device, transfer_batch
 
 PHASE4_RUNS_DIR: Final[Path] = Path("runs/baseline_vs_ga")
@@ -75,10 +83,23 @@ DEFAULT_BATCH_SIZE: Final[int] = 8
 DEFAULT_SEED: Final[int] = 42
 METRICS_CSV_FILENAME: Final[str] = "test_metrics.csv"
 METRICS_JSON_FILENAME: Final[str] = "test_metrics.json"
+SLICES_CSV_FILENAME: Final[str] = "test_slices.csv"
+SLICE_METRICS_JSON_FILENAME: Final[str] = "test_slice_metrics.json"
 MEAN_REGION: Final[str] = "mean"
 WHOLE_TUMOR_REGION: Final[str] = "whole_tumor"
 WHOLE_TUMOR_CLASSES: Final[int] = 2
 CSV_FIELDNAMES: Final[Tuple[str, ...]] = ("model", "region", "dice", "iou")
+SLICE_CSV_FIELDNAMES: Final[Tuple[str, ...]] = (
+    "model",
+    "sample",
+    "class",
+    "dice",
+    "precision",
+    "recall",
+    "tumor_pixels",
+    "predicted_pixels",
+    "detected",
+)
 REFERENCE_MODEL: Final[str] = "baseline"
 CHALLENGER_MODEL: Final[str] = "optimized"
 MINIMUM_SCORE_COLUMN_WIDTH: Final[int] = 10
@@ -96,10 +117,15 @@ class ModelEvaluation:
     name: str
     checkpoint: TrainingCheckpoint
     scores: Tuple[RegionScore, ...]
+    slice_scores: Tuple[SliceScore, ...]
     evaluation_seconds: float
 
     def score_for(self, region: str) -> RegionScore:
         return next(score for score in self.scores if score.region == region)
+
+    @property
+    def slice_summary(self) -> SliceSummary:
+        return summarize_slices(self.slice_scores)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -147,11 +173,15 @@ def to_whole_tumor_labels(class_indices: Tensor) -> Tensor:
 def accumulate_test_metrics(
     model: nn.Module,
     loader: DataLoader[SegmentationBatch],
+    samples: Sequence[SegmentationSample],
+    model_name: str,
     device: torch.device,
     amp_enabled: bool,
-) -> Tuple[SegmentationReport, SegmentationReport]:
+) -> Tuple[SegmentationReport, SegmentationReport, Tuple[SliceScore, ...]]:
     class_metrics = SegmentationMetrics(num_classes=NUM_CLASSES)
     whole_tumor_metrics = SegmentationMetrics(num_classes=WHOLE_TUMOR_CLASSES)
+    slice_scores: List[SliceScore] = []
+    next_sample_index = 0
     model.eval()
     with torch.inference_mode():
         for images, masks in loader:
@@ -162,7 +192,21 @@ def accumulate_test_metrics(
             whole_tumor_metrics.update(
                 to_whole_tumor_labels(predictions), to_whole_tumor_labels(masks)
             )
-    return class_metrics.compute(), whole_tumor_metrics.compute()
+            batch_predictions = to_whole_tumor_labels(predictions).cpu().numpy()
+            batch_masks = to_whole_tumor_labels(masks).cpu().numpy()
+            for prediction, mask in zip(batch_predictions, batch_masks):
+                sample = samples[next_sample_index]
+                slice_scores.append(
+                    score_slice(
+                        prediction,
+                        mask,
+                        model_name,
+                        sample.image_path.stem,
+                        TUMOR_CLASS_NAMES[sample.class_label],
+                    )
+                )
+                next_sample_index += 1
+    return class_metrics.compute(), whole_tumor_metrics.compute(), tuple(slice_scores)
 
 
 def build_region_scores(
@@ -201,11 +245,18 @@ def evaluate_checkpoint(
         samples, checkpoint.image_size, arguments.batch_size, arguments.num_workers, arguments.seed
     )
     start_time = time.perf_counter()
-    class_report, whole_tumor_report = accumulate_test_metrics(model, loader, device, amp_enabled)
+    class_report, whole_tumor_report, slice_scores = accumulate_test_metrics(
+        model, loader, samples, name, device, amp_enabled
+    )
+    if len(slice_scores) != len(samples):
+        raise ValueError(
+            f"Scored {len(slice_scores)} slices but the test set has {len(samples)}."
+        )
     return ModelEvaluation(
         name=name,
         checkpoint=checkpoint,
         scores=build_region_scores(class_report, whole_tumor_report),
+        slice_scores=slice_scores,
         evaluation_seconds=time.perf_counter() - start_time,
     )
 
@@ -260,9 +311,65 @@ def write_metrics_json(
     payload = {
         "test_samples": sum(samples_per_class.values()),
         "test_samples_per_class": dict(samples_per_class),
-        "models": {evaluation.name: serialize_evaluation(evaluation) for evaluation in evaluations},
+        "models": {
+            evaluation.name: serialize_evaluation(evaluation) for evaluation in evaluations
+        },
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def write_slices_csv(path: Path, evaluations: Sequence[ModelEvaluation]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=SLICE_CSV_FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(
+            {
+                "model": score.model,
+                "sample": score.sample_name,
+                "class": score.class_name,
+                "dice": finite_or_none(score.dice),
+                "precision": finite_or_none(score.precision),
+                "recall": finite_or_none(score.recall),
+                "tumor_pixels": score.tumor_pixels,
+                "predicted_pixels": score.predicted_pixels,
+                "detected": score.detected,
+            }
+            for evaluation in evaluations
+            for score in evaluation.slice_scores
+        )
+
+
+def write_slice_metrics_json(
+    path: Path,
+    evaluations: Sequence[ModelEvaluation],
+    samples_per_class: Mapping[str, int],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "test_samples": sum(samples_per_class.values()),
+        "test_samples_per_class": dict(samples_per_class),
+        "models": {
+            evaluation.name: evaluation.slice_summary.to_dict() for evaluation in evaluations
+        },
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def format_slice_summary(evaluation: ModelEvaluation) -> str:
+    summary = evaluation.slice_summary
+    detection_by_class = " · ".join(
+        f"{name} {rate:.1%}" for name, rate in summary.detection_rate_by_class.items()
+    )
+    return (
+        f"{evaluation.name:<10} | detection {summary.detection_rate:.1%} | "
+        f"empty predictions {summary.predicted_empty_slices}/{summary.slices} | "
+        f"missed tumors {summary.missed_tumor_slices} | "
+        f"false positives {summary.false_positive_slices} | "
+        f"Dice mean {summary.dice_mean:.3f} median {summary.dice_median:.3f} | "
+        f"pooled precision {summary.precision:.3f} recall {summary.recall:.3f} | "
+        f"by class: {detection_by_class}"
+    )
 
 
 def format_comparison_table(reference: ModelEvaluation, challenger: ModelEvaluation) -> List[str]:
@@ -329,9 +436,20 @@ def main() -> None:
     output_dir: Path = arguments.output_dir
     csv_path = output_dir / METRICS_CSV_FILENAME
     json_path = output_dir / METRICS_JSON_FILENAME
+    slices_csv_path = output_dir / SLICES_CSV_FILENAME
+    slice_metrics_path = output_dir / SLICE_METRICS_JSON_FILENAME
     write_metrics_csv(csv_path, evaluations)
     write_metrics_json(json_path, evaluations, samples_per_class)
-    print(f"\nTest metrics saved to '{csv_path}' and '{json_path}'.")
+    write_slices_csv(slices_csv_path, evaluations)
+    write_slice_metrics_json(slice_metrics_path, evaluations, samples_per_class)
+
+    print("\nPer-slice whole-tumor metrics:")
+    for evaluation in evaluations:
+        print(format_slice_summary(evaluation))
+    print(
+        f"\nTest metrics saved to '{csv_path}' and '{json_path}'.\n"
+        f"Per-slice metrics saved to '{slices_csv_path}' and '{slice_metrics_path}'."
+    )
 
 
 if __name__ == "__main__":
