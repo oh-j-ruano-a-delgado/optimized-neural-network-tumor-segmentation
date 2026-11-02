@@ -1,12 +1,35 @@
-"""Presentation-grade comparison plots for the baseline and GA-optimized U-Net runs.
+"""Publication-grade comparison plots for the baseline and GA-optimized U-Net runs.
 
-Every figure shares one dark, high-contrast theme applied through ``matplotlib.rc_context``,
-so importing this module never mutates global matplotlib state, and figures are built on
-``matplotlib.figure.Figure`` directly so no GUI backend is needed. Model identity is fixed by
-model name (electric blue for the baseline, neon pink for the GA-optimized run); the pair was
-checked against the dark surface for lightness, chroma, contrast and color-vision-deficiency
-separation, and is always backed by a legend plus direct labels so it never relies on color
-alone. Text always uses neutral ink tokens, never the series color.
+Every figure shares one light, academic theme applied through ``matplotlib.rc_context``, so
+importing this module never mutates global matplotlib state, and figures are built on
+``matplotlib.figure.Figure`` directly so no GUI backend is needed. ``academic_theme`` is the
+public entry point for any other plotting module that wants the same look.
+
+Palette (Pantone TCX references, exact HEX codes, the only colors used for data marks):
+    Classic Blue 19-4052 TCX  #0F4C81  training curves, the reference model, primary bars
+    Viva Magenta 18-1750 TCX  #BB2649  validation curves, challenger models, secondary points
+    Cloud Dancer 11-4201 TCX  #F0EEE9  figure and axes background
+Within one run, training is Classic Blue and validation Viva Magenta, which is why the loss
+figure draws one panel per run with both splits inside it. Across runs, color follows model
+identity by name (Classic Blue for the manual baseline, Viva Magenta for the GA-optimized
+challenger). Only warm neutral grays are added for text, spines and the grid; their contrast on
+Cloud Dancer is 13.4:1 (primary ink), 8.1:1 (secondary ink), 4.9:1 (muted ink) and 3.2:1
+(spines). The grid is thin, dashed and translucent so it recedes behind the data. The two data
+colors keep an OKLab color-vision-deficiency separation of about 10 (protan worst case) and at
+least 5:1 contrast against Cloud Dancer; Classic Blue sits darker than a balanced lightness band,
+which is accepted because the HEX codes are fixed. Identity is always backed by a legend plus
+direct labels, so it never relies on color alone, and text always uses neutral ink, never the
+series color. The property cycle is set to the same two colors so any unstyled artist still
+stays on-palette.
+
+Typography targets LaTeX documents: a serif stack (CMU Serif, Latin Modern Roman, Times New
+Roman, TeX Gyre Termes, then STIXGeneral and DejaVu Serif, which ship with matplotlib). Only
+installed families are passed to matplotlib, which avoids "font not found" warnings, and the
+later families double as per-glyph fallbacks for symbols such as arrows. Math text uses
+Computer Modern when a Computer Modern family is active and STIX otherwise. Fonts are embedded
+as TrueType (``pdf.fonttype`` 42) so PDF figures stay sharp and searchable. Data lines are
+2 pt wide and figures are 10 to 11 inches wide, so at ``\\textwidth`` (about 6.3 inches)
+labels land near 7 pt. Export PDF for the report and PNG (300 dpi by default) for Streamlit.
 
 Training histories are treated as independent series: each curve is drawn against its own
 ``epoch`` column, axis limits span the longest run, an end marker shows where each run stops,
@@ -15,8 +38,8 @@ per run. Runs of different lengths (the 40-epoch baseline next to the 100-epoch 
 therefore need no padding or truncation; ``align_histories`` provides the side-by-side table
 view, where shorter runs are padded with NaN.
 
-Noisy per-epoch values are drawn as thin translucent traces beneath a thick, glowing centered
-rolling mean, while markers, annotations and summaries always refer to the raw values.
+Noisy per-epoch values are drawn as thin translucent traces beneath a 2 pt centered rolling
+mean, while markers, annotations and summaries always refer to the raw values.
 
 The loss axis is labelled generically ("Loss" unless ``loss_label`` says otherwise) because the
 Phase 5 runs train with different criteria (Dice-Focal, Focal Tversky-Focal, Dice-CE) whose
@@ -33,13 +56,12 @@ from typing import Any, Dict, Final, Iterator, List, Mapping, Optional, Sequence
 import matplotlib
 import numpy as np
 import pandas as pd
-from matplotlib import font_manager, patheffects
-from matplotlib.artist import Artist
+from cycler import cycler
+from matplotlib import font_manager
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-from matplotlib.patheffects import AbstractPathEffect
 from matplotlib.ticker import FormatStrFormatter, MaxNLocator, MultipleLocator
 
 EPOCH_COLUMN: Final[str] = "epoch"
@@ -56,40 +78,48 @@ REQUIRED_HISTORY_COLUMNS: Final[Tuple[str, ...]] = (
 )
 REQUIRED_TEST_METRIC_COLUMNS: Final[Tuple[str, ...]] = ("model", "region", "dice", "iou")
 
-SURFACE_COLOR: Final[str] = "#0B0F1A"
-RAISED_SURFACE_COLOR: Final[str] = "#151B2B"
-GRID_COLOR: Final[str] = "#1B2233"
-AXIS_COLOR: Final[str] = "#2E3850"
-TEXT_PRIMARY_COLOR: Final[str] = "#EEF1F7"
-TEXT_SECONDARY_COLOR: Final[str] = "#A9B2C5"
-TEXT_MUTED_COLOR: Final[str] = "#727D95"
-BASELINE_COLOR: Final[str] = "#2F80FF"
-OPTIMIZED_COLOR: Final[str] = "#FF2E9A"
-FONT_CANDIDATES: Final[Tuple[str, ...]] = (
-    "Inter",
-    "Segoe UI",
-    "Helvetica Neue",
-    "Helvetica",
-    "Arial",
-    "DejaVu Sans",
-)
-FALLBACK_FONT: Final[str] = "DejaVu Sans"
+CLASSIC_BLUE: Final[str] = "#0F4C81"
+VIVA_MAGENTA: Final[str] = "#BB2649"
+CLOUD_DANCER: Final[str] = "#F0EEE9"
 
-LINE_WIDTH: Final[float] = 3.2
-RAW_TRACE_WIDTH: Final[float] = 1.3
-RAW_TRACE_ALPHA: Final[float] = 0.42
-END_MARKER_SIZE: Final[float] = 9.0
-HIGHLIGHT_MARKER_SIZE: Final[float] = 12.0
-HIGHLIGHT_HALO_SIZE: Final[float] = 24.0
-MARKER_RING_WIDTH: Final[float] = 2.0
+SURFACE_COLOR: Final[str] = CLOUD_DANCER
+TEXT_PRIMARY_COLOR: Final[str] = "#26241F"
+TEXT_SECONDARY_COLOR: Final[str] = "#4A463F"
+TEXT_MUTED_COLOR: Final[str] = "#6B665E"
+AXIS_COLOR: Final[str] = "#8A857C"
+GRID_COLOR: Final[str] = "#A9A59D"
+TRAINING_COLOR: Final[str] = CLASSIC_BLUE
+VALIDATION_COLOR: Final[str] = VIVA_MAGENTA
+BASELINE_COLOR: Final[str] = CLASSIC_BLUE
+OPTIMIZED_COLOR: Final[str] = VIVA_MAGENTA
+DATA_COLORS: Final[Tuple[str, ...]] = (CLASSIC_BLUE, VIVA_MAGENTA)
+
+COMPUTER_MODERN_FAMILIES: Final[Tuple[str, ...]] = ("CMU Serif", "Latin Modern Roman")
+FONT_CANDIDATES: Final[Tuple[str, ...]] = (
+    *COMPUTER_MODERN_FAMILIES,
+    "Times New Roman",
+    "TeX Gyre Termes",
+    "STIXGeneral",
+    "DejaVu Serif",
+)
+FALLBACK_FONT: Final[str] = "DejaVu Serif"
+
+LINE_WIDTH: Final[float] = 2.0
+RAW_TRACE_WIDTH: Final[float] = 0.9
+RAW_TRACE_ALPHA: Final[float] = 0.35
+REFERENCE_LINE_WIDTH: Final[float] = 1.2
+END_MARKER_SIZE: Final[float] = 6.0
+HIGHLIGHT_MARKER_SIZE: Final[float] = 8.5
+MARKER_RING_WIDTH: Final[float] = 1.4
 BAR_WIDTH: Final[float] = 0.36
 BAR_GAP: Final[float] = 0.03
 AGGREGATE_GROUP_OFFSET: Final[float] = 0.6
 DEFAULT_SMOOTHING_WINDOW: Final[int] = 5
-DEFAULT_DPI: Final[int] = 200
-HEADER_HEIGHT_INCHES: Final[float] = 1.3
-FOOTER_HEIGHT_INCHES: Final[float] = 0.7
-SIDE_MARGIN_INCHES: Final[float] = 0.3
+DEFAULT_DPI: Final[int] = 300
+DEFAULT_FORMATS: Final[Tuple[str, ...]] = ("png", "pdf")
+HEADER_HEIGHT_INCHES: Final[float] = 1.05
+FOOTER_HEIGHT_INCHES: Final[float] = 0.6
+SIDE_MARGIN_INCHES: Final[float] = 0.25
 SECONDS_PER_MINUTE: Final[float] = 60.0
 
 
@@ -118,6 +148,10 @@ REGION_LABELS: Final[Mapping[str, str]] = MappingProxyType(
     }
 )
 AGGREGATE_REGIONS: Final[Tuple[str, ...]] = ("mean", "whole_tumor")
+SPLIT_SERIES: Final[Tuple[Tuple[str, str, str], ...]] = (
+    (TRAIN_LOSS_COLUMN, "Training", TRAINING_COLOR),
+    (VALIDATION_LOSS_COLUMN, "Validation", VALIDATION_COLOR),
+)
 
 
 @dataclass(frozen=True)
@@ -290,65 +324,83 @@ def build_convergence_table(
     return pd.DataFrame(rows)
 
 
-def resolve_font_family(candidates: Sequence[str] = FONT_CANDIDATES) -> str:
+def resolve_font_families(candidates: Sequence[str] = FONT_CANDIDATES) -> List[str]:
     available_families = {font_entry.name for font_entry in font_manager.fontManager.ttflist}
-    return next((family for family in candidates if family in available_families), FALLBACK_FONT)
+    installed = [family for family in candidates if family in available_families]
+    return installed or [FALLBACK_FONT]
+
+
+def resolve_math_fontset(font_families: Sequence[str]) -> str:
+    return "cm" if font_families[0] in COMPUTER_MODERN_FAMILIES else "stix"
 
 
 def build_theme() -> Dict[str, Any]:
+    font_families = resolve_font_families()
     return {
         "figure.facecolor": SURFACE_COLOR,
         "figure.edgecolor": SURFACE_COLOR,
         "savefig.facecolor": SURFACE_COLOR,
         "savefig.edgecolor": SURFACE_COLOR,
+        "savefig.dpi": DEFAULT_DPI,
         "axes.facecolor": SURFACE_COLOR,
         "axes.edgecolor": AXIS_COLOR,
-        "axes.linewidth": 1.1,
+        "axes.linewidth": 0.8,
         "axes.spines.top": False,
         "axes.spines.right": False,
-        "axes.spines.left": False,
+        "axes.spines.left": True,
+        "axes.spines.bottom": True,
         "axes.grid": True,
+        "axes.grid.axis": "y",
         "axes.axisbelow": True,
+        "axes.prop_cycle": cycler(color=list(DATA_COLORS)),
         "axes.labelcolor": TEXT_SECONDARY_COLOR,
-        "axes.labelsize": 12.5,
-        "axes.labelpad": 10.0,
+        "axes.labelsize": 12.0,
+        "axes.labelpad": 8.0,
         "axes.titlecolor": TEXT_PRIMARY_COLOR,
-        "axes.titlesize": 15.0,
-        "axes.titleweight": "semibold",
+        "axes.titlesize": 13.0,
+        "axes.titleweight": "bold",
         "axes.titlelocation": "left",
-        "axes.titlepad": 14.0,
+        "axes.titlepad": 10.0,
         "grid.color": GRID_COLOR,
-        "grid.linewidth": 0.9,
-        "grid.linestyle": "-",
-        "grid.alpha": 1.0,
+        "grid.linewidth": 0.6,
+        "grid.linestyle": "--",
+        "grid.alpha": 0.5,
         "xtick.color": AXIS_COLOR,
         "ytick.color": AXIS_COLOR,
         "xtick.labelcolor": TEXT_SECONDARY_COLOR,
         "ytick.labelcolor": TEXT_SECONDARY_COLOR,
-        "xtick.labelsize": 11.5,
-        "ytick.labelsize": 11.5,
-        "xtick.major.size": 0.0,
-        "ytick.major.size": 0.0,
-        "xtick.major.pad": 9.0,
-        "ytick.major.pad": 9.0,
-        "font.family": [resolve_font_family()],
-        "font.size": 12.0,
+        "xtick.labelsize": 10.5,
+        "ytick.labelsize": 10.5,
+        "xtick.direction": "out",
+        "ytick.direction": "out",
+        "xtick.major.size": 3.5,
+        "ytick.major.size": 3.5,
+        "xtick.major.width": 0.8,
+        "ytick.major.width": 0.8,
+        "xtick.major.pad": 5.0,
+        "ytick.major.pad": 5.0,
+        "font.family": font_families,
+        "font.size": 11.0,
+        "mathtext.fontset": resolve_math_fontset(font_families),
         "text.color": TEXT_PRIMARY_COLOR,
         "legend.frameon": False,
-        "legend.fontsize": 12.5,
+        "legend.fontsize": 11.0,
         "legend.labelcolor": TEXT_PRIMARY_COLOR,
-        "legend.handlelength": 2.4,
-        "legend.columnspacing": 2.0,
+        "legend.handlelength": 2.2,
+        "legend.columnspacing": 1.8,
+        "lines.linewidth": LINE_WIDTH,
         "lines.solid_capstyle": "round",
         "lines.solid_joinstyle": "round",
         "lines.dash_capstyle": "round",
+        "patch.linewidth": 0.0,
         "pdf.fonttype": 42,
+        "ps.fonttype": 42,
         "svg.fonttype": "none",
     }
 
 
 @contextmanager
-def neon_theme() -> Iterator[None]:
+def academic_theme() -> Iterator[None]:
     with matplotlib.rc_context(build_theme()):
         yield
 
@@ -377,21 +429,21 @@ def add_header(figure: Figure, title: str, subtitle: str) -> None:
     left = SIDE_MARGIN_INCHES / width
     figure.text(
         left,
-        1.0 - 0.3 / height,
+        1.0 - 0.22 / height,
         title,
         ha="left",
         va="top",
-        fontsize=22,
+        fontsize=16,
         fontweight="bold",
         color=TEXT_PRIMARY_COLOR,
     )
     figure.text(
         left,
-        1.0 - 0.82 / height,
+        1.0 - 0.6 / height,
         subtitle,
         ha="left",
         va="top",
-        fontsize=12.5,
+        fontsize=11,
         color=TEXT_SECONDARY_COLOR,
     )
 
@@ -400,46 +452,49 @@ def add_footnote(figure: Figure, text: str) -> None:
     width, height = figure.get_size_inches()
     figure.text(
         SIDE_MARGIN_INCHES / width,
-        0.16 / height,
+        0.12 / height,
         text,
         ha="left",
         va="bottom",
-        fontsize=10,
+        fontsize=9,
         color=TEXT_MUTED_COLOR,
     )
 
 
-def add_figure_legend(figure: Figure, handles: Sequence[Artist]) -> None:
+def add_figure_legend(figure: Figure, handles: Sequence[Any]) -> None:
     width, height = figure.get_size_inches()
     figure.legend(
         handles=list(handles),
         loc="upper right",
-        bbox_to_anchor=(1.0 - SIDE_MARGIN_INCHES / width, 1.0 - 0.22 / height),
+        bbox_to_anchor=(1.0 - SIDE_MARGIN_INCHES / width, 1.0 - 0.14 / height),
         ncol=len(handles),
         frameon=False,
     )
 
 
-def build_glow_effects(color: str, line_width: float) -> List[AbstractPathEffect]:
+def build_line_handles(series: Sequence[Tuple[str, str]]) -> List[Line2D]:
     return [
-        patheffects.Stroke(linewidth=line_width * 3.6, foreground=color, alpha=0.07),
-        patheffects.Stroke(linewidth=line_width * 2.2, foreground=color, alpha=0.16),
-        patheffects.Normal(),
+        Line2D([], [], color=color, linewidth=LINE_WIDTH, label=label) for label, color in series
     ]
 
 
-def build_line_handles(runs: Sequence[TrainingRun]) -> List[Line2D]:
-    return [
-        Line2D(
-            [],
-            [],
-            color=run.style.color,
-            linewidth=LINE_WIDTH,
-            label=run.style.label,
-            path_effects=build_glow_effects(run.style.color, LINE_WIDTH),
-        )
-        for run in runs
-    ]
+def build_run_handles(runs: Sequence[TrainingRun]) -> List[Line2D]:
+    return build_line_handles([(run.style.label, run.style.color) for run in runs])
+
+
+def build_split_handles() -> List[Line2D]:
+    return build_line_handles([(label, color) for _, label, color in SPLIT_SERIES])
+
+
+def build_reference_handle(label: str) -> Line2D:
+    return Line2D(
+        [],
+        [],
+        color=TEXT_MUTED_COLOR,
+        linewidth=REFERENCE_LINE_WIDTH,
+        linestyle=(0, (5, 4)),
+        label=label,
+    )
 
 
 def build_patch_handles(model_names: Sequence[str]) -> List[Patch]:
@@ -458,6 +513,7 @@ def draw_point_marker(
         linestyle="none",
         marker="o",
         markersize=size,
+        color=color,
         markerfacecolor=color,
         markeredgecolor=SURFACE_COLOR,
         markeredgewidth=MARKER_RING_WIDTH,
@@ -466,17 +522,6 @@ def draw_point_marker(
 
 
 def draw_highlight_marker(axis: Axes, x: float, y: float, color: str) -> None:
-    axis.plot(
-        [x],
-        [y],
-        linestyle="none",
-        marker="o",
-        markersize=HIGHLIGHT_HALO_SIZE,
-        markerfacecolor=color,
-        markeredgecolor="none",
-        alpha=0.18,
-        zorder=6,
-    )
     draw_point_marker(axis, x, y, color, HIGHLIGHT_MARKER_SIZE)
 
 
@@ -495,44 +540,35 @@ def annotate_point(
         textcoords="offset points",
         ha=horizontal_alignment,
         va="center",
-        fontsize=11.5,
-        fontweight="semibold",
+        fontsize=10,
         color=TEXT_PRIMARY_COLOR,
         bbox={
-            "boxstyle": "round,pad=0.45,rounding_size=0.5",
-            "facecolor": RAISED_SURFACE_COLOR,
+            "boxstyle": "round,pad=0.35,rounding_size=0.3",
+            "facecolor": SURFACE_COLOR,
             "edgecolor": AXIS_COLOR,
-            "linewidth": 0.9,
+            "linewidth": 0.7,
         },
         arrowprops={
             "arrowstyle": "-",
             "color": TEXT_MUTED_COLOR,
-            "linewidth": 1.0,
+            "linewidth": 0.8,
             "shrinkA": 0.0,
-            "shrinkB": 9.0,
+            "shrinkB": 6.0,
         },
         zorder=7,
     )
 
 
 def plot_metric_trace(
-    axis: Axes, run: TrainingRun, column: str, smoothing_window: int
+    axis: Axes, history: pd.DataFrame, column: str, color: str, smoothing_window: int
 ) -> pd.Series:
-    epochs = run.history[EPOCH_COLUMN]
-    values = run.history[column]
-    color = run.style.color
+    epochs = history[EPOCH_COLUMN]
+    values = history[column]
     axis.plot(
         epochs, values, color=color, linewidth=RAW_TRACE_WIDTH, alpha=RAW_TRACE_ALPHA, zorder=2
     )
     smoothed = rolling_mean(values, smoothing_window)
-    axis.plot(
-        epochs,
-        smoothed,
-        color=color,
-        linewidth=LINE_WIDTH,
-        zorder=3,
-        path_effects=build_glow_effects(color, LINE_WIDTH),
-    )
+    axis.plot(epochs, smoothed, color=color, linewidth=LINE_WIDTH, zorder=3)
     last_index = smoothed.last_valid_index()
     if last_index is not None:
         draw_point_marker(axis, epochs.at[last_index], smoothed.at[last_index], color)
@@ -549,7 +585,6 @@ def style_epoch_axis(axis: Axes, runs: Sequence[TrainingRun], title: Optional[st
     axis.xaxis.set_major_locator(MaxNLocator(nbins=10, steps=[1, 2, 5, 10], integer=True))
     axis.grid(axis="x", visible=False)
     axis.set_xlabel("Epoch")
-    axis.tick_params(axis="both", length=0)
     if title is not None:
         axis.set_title(title)
 
@@ -575,38 +610,31 @@ def plot_loss_curves(
     smoothing_window: int = DEFAULT_SMOOTHING_WINDOW,
     loss_label: str = DEFAULT_LOSS_LABEL,
 ) -> Figure:
-    with neon_theme():
-        figure, (train_axis, validation_axis) = create_figure((15.0, 6.8), columns=2, share_y=True)
-        for axis, column, title in (
-            (train_axis, TRAIN_LOSS_COLUMN, "Training loss"),
-            (validation_axis, VALIDATION_LOSS_COLUMN, "Validation loss"),
-        ):
-            for run in runs:
-                plot_metric_trace(axis, run, column, smoothing_window)
-            style_epoch_axis(axis, runs, title)
+    with academic_theme():
+        figure, axes = create_figure((11.0, 5.2), columns=len(runs), share_y=True)
+        summaries: List[Tuple[TrainingRun, ConvergenceSummary]] = []
+        for axis, run in zip(axes, runs):
+            for column, _, color in SPLIT_SERIES:
+                plot_metric_trace(axis, run.history, column, color, smoothing_window)
+            style_epoch_axis(axis, runs, run.style.label)
+            summary = summarize_convergence(run.history, VALIDATION_LOSS_COLUMN, maximize=False)
+            summaries.append((run, summary))
+            draw_highlight_marker(axis, summary.best_epoch, summary.best_value, VALIDATION_COLOR)
+            annotate_point(
+                axis,
+                summary.best_epoch,
+                summary.best_value,
+                f"Min validation {summary.best_value:.4f} · epoch {summary.best_epoch}",
+                (0.0, 40.0),
+            )
 
         highest_loss = max(
             float(run.history[[TRAIN_LOSS_COLUMN, VALIDATION_LOSS_COLUMN]].max().max())
             for run in runs
         )
-        train_axis.set_ylim(0.0, highest_loss * 1.12)
-        train_axis.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
-        train_axis.set_ylabel(loss_label)
-
-        summaries: List[Tuple[TrainingRun, ConvergenceSummary]] = []
-        for run_index, run in enumerate(runs):
-            summary = summarize_convergence(run.history, VALIDATION_LOSS_COLUMN, maximize=False)
-            summaries.append((run, summary))
-            draw_highlight_marker(
-                validation_axis, summary.best_epoch, summary.best_value, run.style.color
-            )
-            annotate_point(
-                validation_axis,
-                summary.best_epoch,
-                summary.best_value,
-                f"Min {summary.best_value:.4f} · epoch {summary.best_epoch}",
-                (0.0, 46.0 if run_index % 2 == 0 else -40.0),
-            )
+        axes[0].set_ylim(0.0, highest_loss * 1.12)
+        axes[0].yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
+        axes[0].set_ylabel(loss_label)
 
         add_header(
             figure,
@@ -618,23 +646,31 @@ def plot_loss_curves(
                 for run, summary in summaries
             ),
         )
-        add_figure_legend(figure, build_line_handles(runs))
+        add_figure_legend(figure, build_split_handles())
         add_footnote(figure, describe_smoothing(smoothing_window))
         figure.draw_without_rendering()
     return figure
 
 
-def draw_reference_level(axis: Axes, level: float, label: str) -> None:
-    axis.axhline(level, color=TEXT_MUTED_COLOR, linewidth=1.3, linestyle=(0, (5, 4)), zorder=1)
+def draw_reference_level(axis: Axes, level: float, label: Optional[str]) -> None:
+    axis.axhline(
+        level,
+        color=TEXT_MUTED_COLOR,
+        linewidth=REFERENCE_LINE_WIDTH,
+        linestyle=(0, (5, 4)),
+        zorder=1,
+    )
+    if label is None:
+        return
     axis.annotate(
         label,
         xy=(1.0, level),
         xycoords=("axes fraction", "data"),
-        xytext=(-4.0, -8.0),
+        xytext=(-4.0, -6.0),
         textcoords="offset points",
         ha="right",
         va="top",
-        fontsize=10.5,
+        fontsize=9.5,
         color=TEXT_SECONDARY_COLOR,
     )
 
@@ -673,10 +709,12 @@ def plot_validation_dice(
 ) -> Figure:
     reference = find_run(runs, reference_name)
     challengers = [run for run in runs if run.name != reference_name]
-    with neon_theme():
-        figure, (axis,) = create_figure((14.0, 7.4), columns=1)
+    with academic_theme():
+        figure, (axis,) = create_figure((10.0, 5.6), columns=1)
         for run in runs:
-            plot_metric_trace(axis, run, VALIDATION_DICE_COLUMN, smoothing_window)
+            plot_metric_trace(
+                axis, run.history, VALIDATION_DICE_COLUMN, run.style.color, smoothing_window
+            )
         style_epoch_axis(axis, runs, None)
 
         summaries = {run.name: summarize_convergence(run.history) for run in runs}
@@ -717,7 +755,7 @@ def plot_validation_dice(
                     crossing_value,
                     f"Passes {reference.style.short_label.lower()} best at epoch "
                     f"{crossing_epoch}{time_suffix}",
-                    (34.0, 52.0),
+                    (30.0, 46.0),
                     horizontal_alignment="left",
                 )
 
@@ -732,12 +770,12 @@ def plot_validation_dice(
                 format_epoch_label(
                     "Best", summary.best_value, summary.best_epoch, summary.seconds_to_best
                 ),
-                (60.0, -62.0) if is_reference else (0.0, 46.0),
+                (50.0, -54.0) if is_reference else (0.0, 40.0),
                 horizontal_alignment="left" if is_reference else "center",
             )
 
         add_header(figure, "Validation Dice per epoch", build_dice_subtitle(reference, challengers))
-        add_figure_legend(figure, build_line_handles(runs))
+        add_figure_legend(figure, build_run_handles(runs))
         add_footnote(figure, describe_smoothing(smoothing_window))
         figure.draw_without_rendering()
     return figure
@@ -813,7 +851,7 @@ def draw_grouped_columns(
                     f"{score:.3f}",
                     ha="center",
                     va="bottom",
-                    fontsize=10.5,
+                    fontsize=9,
                     color=TEXT_PRIMARY_COLOR,
                     zorder=4,
                 )
@@ -827,18 +865,18 @@ def draw_grouped_columns(
                 continue
             axis.text(
                 position,
-                max(reference_score, challenger_score) + 0.105,
+                max(reference_score, challenger_score) + 0.1,
                 f"{challenger_score - reference_score:+.3f}",
                 ha="center",
                 va="bottom",
-                fontsize=10.5,
-                fontweight="semibold",
+                fontsize=9.5,
+                fontweight="bold",
                 color=TEXT_PRIMARY_COLOR,
                 bbox={
-                    "boxstyle": "round,pad=0.35,rounding_size=0.6",
-                    "facecolor": RAISED_SURFACE_COLOR,
+                    "boxstyle": "round,pad=0.3,rounding_size=0.3",
+                    "facecolor": SURFACE_COLOR,
                     "edgecolor": AXIS_COLOR,
-                    "linewidth": 0.9,
+                    "linewidth": 0.7,
                 },
                 zorder=5,
             )
@@ -850,7 +888,8 @@ def draw_grouped_columns(
         axis.axvline(
             (positions[first_aggregate - 1] + positions[first_aggregate]) / 2.0,
             color=AXIS_COLOR,
-            linewidth=1.1,
+            linewidth=0.8,
+            linestyle=(0, (2, 3)),
             zorder=1,
         )
 
@@ -860,7 +899,7 @@ def draw_grouped_columns(
     axis.yaxis.set_major_locator(MultipleLocator(0.2))
     axis.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
     axis.grid(axis="x", visible=False)
-    axis.tick_params(axis="both", length=0)
+    axis.tick_params(axis="x", length=0)
 
 
 def build_test_subtitle(test_metrics: pd.DataFrame, models: Sequence[str]) -> str:
@@ -886,8 +925,8 @@ def build_test_subtitle(test_metrics: pd.DataFrame, models: Sequence[str]) -> st
 def plot_test_metrics(test_metrics: pd.DataFrame) -> Figure:
     models = ordered_models(test_metrics)
     regions = ordered_regions(test_metrics)
-    with neon_theme():
-        figure, axes = create_figure((15.0, 6.9), columns=2, share_y=True)
+    with academic_theme():
+        figure, axes = create_figure((11.0, 5.4), columns=2, share_y=True)
         for axis, metric, title in zip(axes, ("dice", "iou"), ("Dice", "IoU")):
             draw_grouped_columns(axis, test_metrics, models, regions, metric)
             axis.set_title(title)
@@ -916,7 +955,7 @@ def save_figure(
 ) -> List[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: List[Path] = []
-    with neon_theme():
+    with academic_theme():
         for file_format in formats:
             path = output_dir / f"{stem}.{file_format.lstrip('.')}"
             figure.savefig(
@@ -924,7 +963,7 @@ def save_figure(
                 dpi=dpi,
                 facecolor=figure.get_facecolor(),
                 bbox_inches="tight",
-                pad_inches=0.2,
+                pad_inches=0.15,
             )
             saved_paths.append(path)
     return saved_paths

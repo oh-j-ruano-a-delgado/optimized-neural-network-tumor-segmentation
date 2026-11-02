@@ -7,8 +7,12 @@ from typing import List
 import numpy as np
 import pandas as pd
 import pytest
+from matplotlib.colors import to_hex
 
 from src.utils.visualization import (
+    CLASSIC_BLUE,
+    CLOUD_DANCER,
+    VIVA_MAGENTA,
     TrainingRun,
     align_histories,
     build_convergence_table,
@@ -152,3 +156,18 @@ def test_test_metric_chart_tolerates_missing_scores(test_metrics: pd.DataFrame) 
     ]
     figure = plot_test_metrics(incomplete)
     assert not math.isnan(figure.axes[0].get_ylim()[1])
+
+
+def test_figures_use_the_light_pantone_theme(
+    runs_of_different_lengths: List[TrainingRun], test_metrics: pd.DataFrame
+) -> None:
+    loss_figure = plot_loss_curves(runs_of_different_lengths, smoothing_window=3)
+    test_figure = plot_test_metrics(test_metrics)
+    palette = {CLASSIC_BLUE.lower(), VIVA_MAGENTA.lower()}
+
+    for figure in (loss_figure, test_figure):
+        assert to_hex(figure.get_facecolor()) == CLOUD_DANCER.lower()
+        assert all(to_hex(axis.get_facecolor()) == CLOUD_DANCER.lower() for axis in figure.axes)
+    for axis in loss_figure.axes:
+        assert palette <= {to_hex(line.get_color()) for line in axis.get_lines()}
+    assert palette == {to_hex(patch.get_facecolor()) for patch in test_figure.axes[0].patches}
