@@ -1,0 +1,96 @@
+\section{Datos y protocolo experimental}\label{sec:datos}
+
+\subsection{Conjunto de datos}\label{subsec:dataset}
+
+Se emplea el conjunto público de Figshare~\cite{cheng2017figshare}, introducido por Cheng et~al.~\cite{cheng2015enhanced}, que contiene 3064 cortes de RM ponderada en T1 con contraste procedentes de 233 pacientes: 708 cortes de meningioma (82 pacientes), 1426 de glioma (89 pacientes) y 930 de tumor hipofisario (62 pacientes). Cada registro incluye la imagen, de 16 bits de profundidad y $512\times512$ píxeles (salvo 15 cortes de $256\times256$), el tipo de tumor, el identificador del paciente y una máscara binaria de la lesión delineada manualmente por radiólogos. Los cortes proceden de los planos axial, coronal y sagital. Para el problema multiclase, la máscara binaria se combina con el tipo de tumor, de modo que cada píxel tumoral recibe la etiqueta de su clase ($1$, $2$ o $3$) y el resto la etiqueta de fondo ($0$).
+
+\subsection{Partición por paciente}\label{subsec:particion}
+
+Cortes adyacentes de un mismo paciente son casi idénticos, por lo que una partición aleatoria por corte filtraría información entre subconjuntos e inflaría artificialmente las métricas. Por ello, todas las particiones se realizan \emph{por paciente} y estratificadas por tipo de tumor, con semilla fija. Primero se reserva el 20\,\% de los pacientes de cada clase como conjunto de prueba, y después el 20\,\% de los pacientes restantes como conjunto de validación. La \cref{tab:particion} resume el resultado.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Partición por paciente, estratificada por tipo de tumor. Entre paréntesis, pacientes de meningioma, glioma y tumor hipofisario.}
+  \label{tab:particion}
+  \begin{tabular}{lcrrrr}
+    \toprule
+    \textbf{Subconjunto} & \textbf{Pacientes} & \textbf{Meningioma} & \textbf{Glioma} & \textbf{Hipofisario} & \textbf{Total} \\
+    \midrule
+    Entrenamiento & 150 (53/57/40) & 461 & 938 & 605 & 2004 \\
+    Validación    & 37 (13/14/10)  & 118 & 188 & 162 & 468 \\
+    Prueba        & 46 (16/18/12)  & 129 & 300 & 163 & 592 \\
+    \midrule
+    Total         & 233 (82/89/62) & 708 & 1426 & 930 & 3064 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+El conjunto de prueba no interviene en el entrenamiento, en la selección de puntos de control ni en la búsqueda del algoritmo genético. El conjunto de validación cumple tres funciones: es el entorno en el que se mide la aptitud de cada individuo del AG, el criterio para seleccionar el mejor punto de control de cada entrenamiento y la base de los diagnósticos de error.
+
+\subsection{Preprocesamiento}\label{subsec:preprocesamiento}
+
+Cada par imagen-máscara atraviesa la siguiente secuencia determinista:
+
+\begin{enumerate}
+  \item \textbf{Recorte de márgenes.} Se detecta el contorno de la cabeza mediante un suavizado gaussiano, una umbralización al 8\,\% del rango de intensidad y una apertura morfológica que elimina ruido y anotaciones incrustadas. El recorte se calcula como la caja que engloba todas las componentes conexas relevantes y la propia lesión, con un margen de 4 píxeles. Así se elimina fondo negro que no aporta información y se aumenta la resolución efectiva del cerebro.
+  \item \textbf{Redimensionado} a $256\times256$ píxeles, con interpolación por área para la imagen y por vecino más próximo para la máscara, de modo que cada píxel de la máscara conserva una etiqueta válida.
+  \item \textbf{Normalización min-max} al intervalo $[0,1]$, tras recortar las intensidades a los percentiles 0.5 y 99.5 para que unos pocos píxeles saturados no compriman el rango útil del tejido.
+\end{enumerate}
+
+\subsection{Aumento de datos}\label{subsec:aumento}
+
+El aumento de datos actúa como regularizador del problema de optimización interno: amplía el conjunto efectivo de entrenamiento con transformaciones que preservan la etiqueta. Se implementaron dos bloques independientes con la biblioteca Albumentations~\cite{buslaev2020albumentations}, combinados en un diseño factorial $2\times2$ (\cref{tab:aumento}):
+
+\begin{itemize}
+  \item \textbf{Bloque espacial básico}: volteos horizontal y vertical ($p=0.5$ cada uno) y rotación de hasta $\pm15^\circ$ en todas las muestras.
+  \item \textbf{Bloque espacial avanzado}: volteo horizontal ($p=0.5$); transformación afín con rotación de $\pm15^\circ$, escala entre $0.9$ y $1.1$ y traslación de $\pm6\,\%$ ($p=0.7$); y, con $p=0.3$, una deformación elástica ($\alpha=200$, $\sigma=8$) o una distorsión de rejilla (5 pasos, límite $0.15$). Se suprime el volteo vertical porque el conjunto contiene cortes sagitales y coronales, en los que una inversión arriba-abajo genera anatomía inexistente.
+  \item \textbf{Bloque de intensidad}: brillo y contraste ($\pm0.15$, $p=0.5$), corrección gamma (factor entre 0.8 y 1.2, $p=0.3$) y ruido gaussiano (desviación entre 0.01 y 0.03, $p=0.2$), aplicados tras la normalización.
+\end{itemize}
+
+\begin{table}[htbp]
+  \centering
+  \caption{Diseño factorial de los preajustes de aumento de datos. Cada preajuste de aislamiento difiere de los demás en exactamente un bloque.}
+  \label{tab:aumento}
+  \begin{tabular}{lcc}
+    \toprule
+     & \textbf{Sin intensidad} & \textbf{Con intensidad} \\
+    \midrule
+    \textbf{Espacial básico}   & \texttt{basic}            & \texttt{advanced\_intensity} \\
+    \textbf{Espacial avanzado} & \texttt{advanced\_spatial} & \texttt{advanced} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Métricas de evaluación}\label{subsec:metricas}
+
+Sean $P_c$ y $G_c$ los conjuntos de píxeles predichos y reales de la clase $c$, acumulados sobre \emph{todo} el conjunto de evaluación (y no promediados por imagen). Las métricas principales son el coeficiente Dice~\cite{dice1945measures} y el índice de Jaccard (IoU):
+\begin{equation}\label{eq:dice}
+  \DiceOp_c = \frac{2\,|P_c \cap G_c|}{|P_c| + |G_c|},
+  \qquad
+  \IoUOp_c = \frac{|P_c \cap G_c|}{|P_c \cup G_c|},
+  \qquad
+  \DiceOp_c = \frac{2\,\IoUOp_c}{1 + \IoUOp_c}.
+\end{equation}
+El \emph{Dice medio} es la media aritmética sobre las tres clases tumorales, excluido el fondo, cuya inclusión inflaría artificialmente cualquier métrica. Como métricas complementarias se emplean el Dice de \emph{tumor completo} (lesión frente a fondo, independientemente del tipo), la precisión, la sensibilidad (\emph{recall}), la razón entre falsos negativos y falsos positivos (FN/FP), el porcentaje de píxeles tumorales clasificados como fondo y el porcentaje de cortes en los que no se predice ningún píxel tumoral. En la comparación final, la incertidumbre se cuantifica mediante \emph{bootstrap} pareado por paciente~\cite{efron1993bootstrap}: 10\,000 remuestreos estratificados por tipo de tumor de los 46 pacientes de prueba.
+
+\subsection{Protocolo experimental}\label{subsec:protocolo}
+
+Todos los entrenamientos se ejecutaron en GPU (Kaggle) con PyTorch~\cite{paszke2019pytorch}, precisión mixta automática, lotes de 8 imágenes y semilla 42. En cada entrenamiento se conserva el punto de control con mayor Dice medio de validación. El conjunto de prueba se reservó para comparaciones planificadas de antemano y se utilizó tres veces a lo largo del proyecto: referencia manual frente a la configuración del AG, configuración del AG frente al modelo refinado y modelo refinado frente al modelo con transferencia. La \cref{tab:ejecuciones} enumera las ejecuciones citadas en el resto del documento; su configuración completa se recoge en el \cref{app:configuraciones}.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Ejecuciones de entrenamiento referenciadas en el documento.}
+  \label{tab:ejecuciones}
+  \begin{tabularx}{\linewidth}{llX}
+    \toprule
+    \textbf{Ejecución} & \textbf{Fase} & \textbf{Propósito} \\
+    \midrule
+    Referencia & 2--4 & Configuración manual de hiperparámetros (punto de partida). \\
+    A          & 3--4 & Hiperparámetros encontrados por el algoritmo genético. \\
+    B, C, D    & 5    & Diseño factorial pérdida $\times$ aumento sobre los hiperparámetros del AG. \\
+    D-ext, S, I & 5   & Entrenamiento prolongado y aislamiento de los bloques espacial y de intensidad. \\
+    E16, E     & 6    & Recocido coseno y pesos Focal Tversky recalibrados, con 16 y 32 filtros. \\
+    F          & 7    & Complemento: codificador ResNet34 preentrenado en ImageNet. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}

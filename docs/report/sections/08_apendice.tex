@@ -1,0 +1,63 @@
+\section{Configuración de todas las ejecuciones}\label{app:configuraciones}
+
+La \cref{tab:todas} recoge la configuración y el resultado de todas las ejecuciones citadas. Salvo indicación contraria, todas comparten profundidad $D=4$, optimizador Adam, lotes de 8 imágenes, entrada de $256\times256$ píxeles, normalización min-max, precisión mixta y semilla 42. Todas las ejecuciones posteriores a la Fase 3 usan los hiperparámetros del algoritmo genético: $\eta=3.15144\cdot10^{-4}$ y $\lambda=1.90823\cdot10^{-6}$.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Configuración y resultados de todas las ejecuciones. DF: Dice-Focal ($w_r=w_p=0.5$, $\gamma=2$). FT: Focal Tversky-Focal ($w_r=w_p=0.5$, $\gamma_T=4/3$) con los pesos $\alpha/\beta$ indicados. PT: parada temprana con paciencia de 20 épocas. Los aumentos se definen en la \cref{subsec:aumento}.}
+  \label{tab:todas}
+  \small
+  \setlength{\tabcolsep}{3.4pt}
+  \begin{tabular}{llcclcccc}
+    \toprule
+    \textbf{Ejec.} & \textbf{Red} & \textbf{Prog.} & \textbf{Épocas} & \textbf{Pérdida} & \textbf{Aumento} & \textbf{Mejor ép.} & \textbf{Dice val.} & \textbf{Dice prueba} \\
+    \midrule
+    Ref.$^{\dagger}$ & U-Net 16 & const. & 40 & DF & básico & 35 & 0.6538 & 0.6905 \\
+    A     & U-Net 16 & const. & 100 & DF & básico & 64 & 0.7702 & 0.7760 \\
+    B     & U-Net 16 & const. & 100 & DF & avanzado & 41 & 0.7595 & -- \\
+    C     & U-Net 16 & const. & 100 & FT 0.7/0.3 & básico & 52 & 0.7672 & -- \\
+    D     & U-Net 16 & const. & 100 & FT 0.7/0.3 & avanzado & 97 & 0.7675 & -- \\
+    D-ext & U-Net 16 & const. & 42 (PT) & FT 0.7/0.3 & avanzado & 22 & 0.7440 & -- \\
+    S     & U-Net 16 & const. & 71 (PT) & FT 0.7/0.3 & esp. avanz. & 51 & 0.7751 & -- \\
+    I     & U-Net 16 & const. & 64 (PT) & FT 0.7/0.3 & intensidad & 44 & 0.7454 & -- \\
+    E16   & U-Net 16 & coseno & 150 & FT 0.6/0.4 & esp. avanz. & 95 & 0.7693 & -- \\
+    E     & U-Net 32 & coseno & 150 & FT 0.6/0.4 & esp. avanz. & 72 & 0.7612 & 0.8175 \\
+    F$^{\ast}$ & ResNet34 & coseno & 100 & FT 0.6/0.4 & esp. avanz. & 84 & 0.8221 & 0.8250 \\
+    \bottomrule
+  \end{tabular}
+
+  \smallskip
+  \parbox{0.92\linewidth}{\footnotesize U-Net 16 y U-Net 32: U-Net propia con 16 o 32 filtros base. $^{\dagger}$La referencia usa $\eta=10^{-3}$ y $\lambda=10^{-4}$; el resto, los valores del AG. $^{\ast}$U-Net de Segmentation Models PyTorch con codificador ResNet34 preentrenado, cuya tasa de aprendizaje es diez veces menor que la del decodificador.}
+\end{table}
+
+\section{Reproducibilidad}\label{app:reproducibilidad}
+
+El código fuente del proyecto está organizado en módulos de datos (\texttt{src/dataset}), modelos y pérdidas (\texttt{src/models}), optimización (\texttt{src/optimization}) y utilidades de entrenamiento y evaluación (\texttt{src/utils}), con guiones ejecutables en \texttt{scripts/} y la interfaz en \texttt{app/}. El algoritmo genético se implementa en \texttt{src/optimization/genetic.py} y su función de aptitud en \texttt{src/optimization/fitness.py}. Las órdenes siguientes reproducen las ejecuciones principales desde la raíz del repositorio:
+
+\begin{small}
+\begin{verbatim}
+python -m scripts.run_optimization --epochs 3 --device auto --amp
+
+python -m scripts.train_baseline --epochs 100 --learning-rate 0.000315144 \
+    --weight-decay 1.90823e-06 --base-filters 16 --depth 4 --batch-size 8 \
+    --seed 42 --device auto --amp
+
+python -m scripts.train_baseline --epochs 150 --learning-rate 0.000315144 \
+    --weight-decay 1.90823e-06 --base-filters 32 --depth 4 --batch-size 8 \
+    --seed 42 --augmentation advanced_spatial --loss focal_tversky_focal \
+    --tversky-alpha 0.6 --tversky-beta 0.4 --lr-schedule cosine \
+    --device auto --amp
+
+python -m scripts.train_baseline --model smp_unet --encoder resnet34 \
+    --encoder-weights imagenet --encoder-lr-multiplier 0.1 --epochs 100 \
+    --learning-rate 0.000315144 --weight-decay 1.90823e-06 --batch-size 8 \
+    --seed 42 --augmentation advanced_spatial --loss focal_tversky_focal \
+    --tversky-alpha 0.6 --tversky-beta 0.4 --lr-schedule cosine \
+    --device auto --amp
+
+python -m scripts.evaluate_test_set
+streamlit run app/main.py
+\end{verbatim}
+\end{small}
+
+Las órdenes corresponden, por este orden, a la búsqueda del algoritmo genético, al reentrenamiento de la configuración del AG (ejecución A), al modelo refinado (E), al modelo con transferencia de aprendizaje (F), a la evaluación en el conjunto de prueba y a la interfaz de inferencia. Los datos de todas las figuras de esta memoria se encuentran en la carpeta \texttt{data/} del propio documento.

@@ -1,0 +1,62 @@
+\section{Introducción}\label{sec:introduccion}
+
+\subsection{Contexto clínico}\label{subsec:contexto}
+
+Los tumores del sistema nervioso central constituyen un grupo heterogéneo de neoplasias cuyo diagnóstico, planificación terapéutica y seguimiento dependen de forma crítica de la imagen médica~\cite{louis2021who}. La resonancia magnética (RM) es la modalidad de referencia para su estudio, por su elevado contraste entre tejidos blandos y por no emplear radiación ionizante. Entre las secuencias habituales, la ponderada en T1 tras la administración de un contraste de gadolinio (T1-CE) realza las regiones en las que la barrera hematoencefálica está alterada, lo que hace visible el tejido tumoral activo frente al parénquima sano. Cada corte de esta secuencia es una imagen bidimensional en escala de grises: un único canal de intensidad, sin información de color, en el que la lesión se distingue exclusivamente por su brillo, su textura y su forma.
+
+Este trabajo considera tres tipos de tumor cerebral con características radiológicas muy distintas:
+
+\begin{itemize}
+  \item \textbf{Meningioma.} Tumor extraaxial, generalmente benigno, que se origina en las meninges. Suele presentar bordes bien definidos y un realce intenso y homogéneo, aunque puede aparecer en múltiples localizaciones de la convexidad y de la base del cráneo.
+  \item \textbf{Glioma.} Tumor intraaxial originado en las células gliales del parénquima cerebral. Su crecimiento infiltrativo produce márgenes difusos e irregulares y un realce heterogéneo, a menudo con zonas necróticas. Es, con diferencia, el tipo más difícil de delimitar, también para los especialistas.
+  \item \textbf{Tumor hipofisario.} Lesión localizada en la región selar, en la línea media de la base del cráneo. Suele ser de pequeño tamaño y de contornos regulares, pero su proximidad a otras estructuras de la base craneal puede confundirlo con un meningioma de esa zona.
+\end{itemize}
+
+La delimitación manual del tumor corte a corte es una tarea lenta y sujeta a variabilidad entre observadores. Un sistema de segmentación automática que proporcione una máscara precisa de la lesión y de su tipo permitiría cuantificar volúmenes de forma reproducible, acelerar la planificación quirúrgica o radioterápica y estandarizar el seguimiento longitudinal.
+
+\subsection{Planteamiento del problema}\label{subsec:problema}
+
+Formalmente, dado un corte $\vx \in [0,1]^{H\times W}$ normalizado, el objetivo es asignar a cada píxel $i$ una etiqueta $y_i \in \{0,1,2,3\}$, donde $0$ denota el fondo (incluido el tejido sano) y $1$, $2$ y $3$ denotan meningioma, glioma y tumor hipofisario, respectivamente. Se trata, por tanto, de un problema de \emph{segmentación semántica multiclase} en el que cada corte contiene un único tipo tumoral, de modo que la red debe resolver simultáneamente dónde está el tumor y de qué tipo es.
+
+El problema presenta cuatro dificultades que condicionan todas las decisiones de diseño posteriores:
+
+\begin{enumerate}
+  \item \textbf{Desequilibrio extremo de clases.} En las imágenes originales, el tumor ocupa de media el 1.7\,\% del corte (mediana del 1.3\,\%, y solo el 0.8\,\% en los tumores hipofisarios). Un clasificador trivial que asignase todos los píxeles al fondo alcanzaría una exactitud superior al 98\,\% y, sin embargo, un coeficiente Dice nulo para las tres clases tumorales. La función objetivo debe, por tanto, diseñarse explícitamente para no quedar dominada por el fondo.
+  \item \textbf{Variabilidad morfológica.} El tamaño, la forma, la localización y la intensidad de las lesiones varían mucho entre pacientes y entre los planos axial, coronal y sagital presentes en el conjunto de datos.
+  \item \textbf{Similitud entre clases.} Meningiomas de la base del cráneo y tumores hipofisarios comparten localización y apariencia en un único corte bidimensional, y los bordes infiltrativos del glioma se confunden con el tejido circundante.
+  \item \textbf{Escasez de datos.} Se dispone de 3064 cortes de 233 pacientes, un volumen reducido para entrenar desde cero una red convolucional profunda.
+\end{enumerate}
+
+\subsection{Enfoque: un problema de optimización en dos niveles}\label{subsec:enfoque}
+
+La tesis central de este trabajo es que la construcción de un segmentador eficaz es, en su totalidad, un problema de optimización con dos niveles anidados, y que ambos niveles merecen el mismo tratamiento riguroso.
+
+En el \textbf{nivel interno}, una vez fijado un vector de hiperparámetros $\vlambda$, el entrenamiento de la red consiste en encontrar los pesos $\vtheta$ que minimizan una función de pérdida diferenciable sobre el conjunto de entrenamiento. Es un problema de optimización continua de muy alta dimensión (entre $10^6$ y $10^7$ variables de decisión en este trabajo), no convexo y estocástico, que se resuelve con un método de primer orden cuyos gradientes se calculan de forma exacta mediante retropropagación. La arquitectura U-Net~\cite{ronneberger2015unet} no es aquí un mero modelo predictivo, sino la parametrización que define el espacio de búsqueda y la geometría del paisaje de la función objetivo.
+
+En el \textbf{nivel externo}, los hiperparámetros $\vlambda$ que gobiernan el proceso anterior (la tasa de aprendizaje, la regularización y el tamaño de la red) se eligen para maximizar la calidad del modelo resultante sobre datos no vistos. Este segundo problema no admite gradientes, mezcla variables continuas y categóricas, y cada evaluación de la función objetivo exige entrenar una red completa. Es el escenario natural de las metaheurísticas, y en este trabajo se aborda con un algoritmo genético (AG)~\cite{holland1975adaptation,goldberg1989genetic}.
+
+Ambos niveles se relacionan mediante la formulación binivel
+\begin{equation}\label{eq:binivel}
+  \vlambda^{\star} \in \argmax_{\vlambda \in \Lambda} \; \DiceOp_{\mathrm{val}}\bigl(\vtheta^{\star}(\vlambda)\bigr)
+  \quad \text{sujeto a} \quad
+  \vtheta^{\star}(\vlambda) \in \argmin_{\vtheta} \; \Loss_{\mathrm{ent}}(\vtheta;\vlambda),
+\end{equation}
+donde $\Lambda$ es el espacio de búsqueda de hiperparámetros, $\Loss_{\mathrm{ent}}$ la pérdida de entrenamiento y $\DiceOp_{\mathrm{val}}$ el coeficiente Dice medio sobre el conjunto de validación. El problema interno se resuelve de forma aproximada por descenso de gradiente, y el externo de forma aproximada por evolución artificial.
+
+\subsection{Objetivos}\label{subsec:objetivos}
+
+Los objetivos del proyecto son los siguientes:
+
+\begin{enumerate}
+  \item Formular e implementar el entrenamiento de una U-Net multiclase como un problema de optimización continua, con funciones de pérdida sustitutas diseñadas para el desequilibrio de clases (Dice-Focal y Focal Tversky), y analizar el papel de la arquitectura, el optimizador y la programación de la tasa de aprendizaje en ese proceso.
+  \item Diseñar e implementar un algoritmo genético de codificación real que optimice los hiperparámetros de la red mediante una función de aptitud de bajo coste.
+  \item Comparar analíticamente la configuración obtenida por la heurística con una configuración manual de referencia, tanto en precisión (Dice e IoU sobre un conjunto de prueba independiente) como en velocidad de convergencia.
+  \item Analizar críticamente las limitaciones de la solución heurística y superarlas mediante experimentos controlados.
+  \item De forma complementaria, evaluar si la transferencia de aprendizaje desde ImageNet supera los límites intrínsecos de un conjunto de datos pequeño, y ofrecer una interfaz gráfica para la inferencia interactiva.
+\end{enumerate}
+
+\subsection{Contribuciones y estructura del documento}\label{subsec:estructura}
+
+Las principales aportaciones del trabajo son: (i) un análisis del entrenamiento de la U-Net desde la óptica de la optimización, que incluye el gradiente de la pérdida Focal Tversky y su efecto sobre el equilibrio entre precisión y sensibilidad; (ii) un algoritmo genético propio, con codificación real normalizada, control de novedad y memoización de la aptitud, que mejora la configuración manual en 0.086 puntos de Dice medio en prueba; (iii) la identificación de un sesgo de horizonte corto en la aptitud del AG y su corrección, que eleva el modelo entrenado desde cero hasta un Dice medio de 0.8175 en prueba; y (iv) una evaluación honesta de la transferencia de aprendizaje con intervalos de confianza por remuestreo de pacientes.
+
+El documento se organiza como sigue. La \cref{sec:datos} describe el conjunto de datos, el preprocesamiento y el protocolo experimental. La \cref{sec:unet} desarrolla el nivel interno: la U-Net como problema de optimización resuelto por descenso de gradiente y retropropagación. La \cref{sec:ag} desarrolla el nivel externo: el algoritmo genético, su codificación, su función de aptitud, sus operadores y sus resultados. La \cref{sec:refinamiento} analiza las limitaciones de la solución heurística y describe cómo se superaron. La \cref{sec:transferencia} presenta, como complemento, el experimento de transferencia de aprendizaje. Por último, la \cref{sec:discusion} discute los resultados, sus amenazas a la validez y las líneas de trabajo futuro.

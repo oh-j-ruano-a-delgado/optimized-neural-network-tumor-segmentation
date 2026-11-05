@@ -1,0 +1,178 @@
+\documentclass[11pt,a4paper,oneside]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-tabla,es-nodecimaldot,es-noshorthands]{babel}
+\spanishplainpercent
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[a4paper,top=2.5cm,bottom=2.5cm,left=2.7cm,right=2.7cm,headheight=14pt]{geometry}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{booktabs,tabularx,multirow,array}
+\usepackage{graphicx}
+\usepackage[table]{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,calc,fit,backgrounds,shapes.geometric,shapes.misc,decorations.pathreplacing,babel}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{groupplots}
+\usepackage[ruled,vlined,linesnumbered,spanish]{algorithm2e}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{csquotes}
+\usepackage[backend=biber,style=numeric-comp,sorting=none,maxbibnames=6,giveninits=true,url=false,doi=true]{biblatex}
+\addbibresource{referencias.bib}
+\usepackage[colorlinks=true,linkcolor=azulenlace,citecolor=azulenlace,urlcolor=azulenlace]{hyperref}
+\usepackage[spanish,noabbrev]{cleveref}
+
+\definecolor{azulenlace}{HTML}{1F4E79}
+\definecolor{cazul}{HTML}{0072B2}
+\definecolor{cbermellon}{HTML}{D55E00}
+\definecolor{cverde}{HTML}{009E73}
+\definecolor{cnaranja}{HTML}{E69F00}
+\definecolor{ccielo}{HTML}{56B4E9}
+\definecolor{cpurpura}{HTML}{CC79A7}
+\definecolor{cgris}{HTML}{6E6E6E}
+\definecolor{fondogen}{HTML}{EAF3FA}
+\definecolor{fondocat}{HTML}{FDF1E3}
+
+\crefname{table}{tabla}{tablas}
+\Crefname{table}{Tabla}{Tablas}
+\crefname{figure}{figura}{figuras}
+\Crefname{figure}{Figura}{Figuras}
+\crefname{algocf}{algoritmo}{algoritmos}
+\Crefname{algocf}{Algoritmo}{Algoritmos}
+\crefname{equation}{ecuación}{ecuaciones}
+\Crefname{equation}{Ecuación}{Ecuaciones}
+\crefname{section}{sección}{secciones}
+\Crefname{section}{Sección}{Secciones}
+\crefname{subsection}{apartado}{apartados}
+\Crefname{subsection}{Apartado}{Apartados}
+\crefname{appendix}{apéndice}{apéndices}
+\Crefname{appendix}{Apéndice}{Apéndices}
+
+\captionsetup{font=small,labelfont=bf,format=hang,margin=0.5cm}
+\setlist{itemsep=2pt,topsep=4pt}
+\setcounter{tocdepth}{2}
+\renewcommand{\topfraction}{0.85}
+\renewcommand{\bottomfraction}{0.6}
+\renewcommand{\textfraction}{0.12}
+\renewcommand{\floatpagefraction}{0.75}
+\makeatletter
+\setlength{\@fptop}{0pt}
+\setlength{\@fpsep}{14pt plus 2fil}
+\setlength{\@fpbot}{0pt plus 1fil}
+\makeatother
+\renewcommand{\arraystretch}{1.15}
+\SetAlCapSkip{0.6em}
+\SetKwInput{KwIn}{Entrada}
+\SetKwInput{KwOut}{Salida}
+\SetKw{KwTo}{hasta}
+\SetKw{KwRet}{devolver}
+\SetKwFor{For}{para}{hacer}{fin}
+\SetKwFor{ForEach}{para cada}{hacer}{fin}
+\SetKwFor{While}{mientras}{hacer}{fin}
+\SetKwIF{If}{ElseIf}{Else}{si}{entonces}{si no, si}{si no}{fin}
+
+\pgfplotsset{
+  informe/.style={
+    width=\linewidth,
+    height=6.2cm,
+    grid=major,
+    grid style={line width=0.2pt,draw=gray!25},
+    axis line style={draw=gray!70},
+    tick style={draw=gray!70},
+    tick label style={font=\footnotesize},
+    label style={font=\small},
+    legend style={font=\footnotesize,draw=gray!50,fill=white,fill opacity=0.9,text opacity=1},
+    legend cell align=left,
+    every axis plot/.append style={line join=round},
+  },
+}
+
+\DeclareMathOperator*{\argmin}{arg\,m\acute{\imath}n}
+\DeclareMathOperator*{\argmax}{arg\,m\acute{a}x}
+\DeclareMathOperator{\DiceOp}{Dice}
+\DeclareMathOperator{\IoUOp}{IoU}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\vtheta}{\bm{\theta}}
+\newcommand{\vlambda}{\bm{\lambda}}
+\newcommand{\vu}{\mathbf{u}}
+\newcommand{\vx}{\mathbf{x}}
+\newcommand{\vy}{\mathbf{y}}
+\newcommand{\vz}{\mathbf{z}}
+\newcommand{\vp}{\mathbf{p}}
+\newcommand{\vg}{\mathbf{g}}
+\newcommand{\Loss}{\mathcal{L}}
+\newcommand{\Dtrain}{\mathcal{D}_{\mathrm{ent}}}
+\newcommand{\Dval}{\mathcal{D}_{\mathrm{val}}}
+\newcommand{\Dtest}{\mathcal{D}_{\mathrm{test}}}
+\newcommand{\aptitud}{\widehat{F}}
+
+\newcommand{\universidad}{Universidad de Las Palmas de Gran Canaria}
+\newcommand{\asignatura}{Optimización y Heurística}
+\newcommand{\cursoacademico}{Curso 2026--2027}
+\newcommand{\tituloinforme}{Optimización en dos niveles para la segmentación automática de tumores cerebrales en resonancia magnética}
+\newcommand{\subtituloinforme}{Descenso de gradiente en una red U-Net y metaoptimización de hiperparámetros mediante un algoritmo genético}
+\newcommand{\fechainforme}{Noviembre de 2026}
+
+\hypersetup{pdftitle={\tituloinforme},pdfauthor={Javier Ruano Hernández, Alejandro Delgado Valera},pdfsubject={\asignatura}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\itshape \asignatura}
+\fancyhead[R]{\small\itshape Segmentación de tumores cerebrales}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  \vspace*{1.2cm}
+  {\large\scshape \universidad\par}
+  \vspace{0.3cm}
+  {\normalsize Asignatura: \asignatura\par}
+  {\normalsize \cursoacademico\par}
+  \vspace{2.6cm}
+  \rule{\linewidth}{0.8pt}\par
+  \vspace{0.5cm}
+  {\LARGE\bfseries \tituloinforme\par}
+  \vspace{0.5cm}
+  {\large\itshape \subtituloinforme\par}
+  \vspace{0.4cm}
+  \rule{\linewidth}{0.8pt}\par
+  \vspace{2.2cm}
+  {\large Memoria final del proyecto\par}
+  \vspace{1.6cm}
+  \begin{tabular}{c}
+    \large Javier Ruano Hernández\\[4pt]
+    \large Alejandro Delgado Valera
+  \end{tabular}\par
+  \vfill
+  {\large \fechainforme\par}
+\end{titlepage}
+
+\input{sections/00_resumen}
+
+\clearpage
+\tableofcontents
+\clearpage
+
+\input{sections/01_introduccion}
+\input{sections/02_datos_protocolo}
+\input{sections/03_unet_optimizacion}
+\input{sections/04_algoritmo_genetico}
+\input{sections/05_refinamiento}
+\input{sections/06_transferencia}
+\input{sections/07_discusion_conclusiones}
+
+\clearpage
+\printbibliography[heading=bibintoc,title={Referencias}]
+
+\appendix
+\input{sections/08_apendice}
+
+\end{document}

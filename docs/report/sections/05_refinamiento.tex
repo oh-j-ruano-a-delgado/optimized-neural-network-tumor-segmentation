@@ -1,0 +1,159 @@
+\section{Superando los límites de la heurística: análisis y refinamiento}\label{sec:refinamiento}
+
+El algoritmo genético encontró una configuración del optimizador claramente mejor que la manual, pero su solución está condicionada por dos limitaciones de diseño: la aptitud de tres épocas y un cromosoma que deja fuera la función de pérdida, el aumento de datos y la programación de la tasa de aprendizaje. Esta sección describe cómo se analizó la solución heurística y cómo se superaron esas limitaciones mediante un ciclo de diagnóstico, formulación de hipótesis y experimentación controlada (Fases 5 y 6). En todos los experimentos se conservan la tasa de aprendizaje y el decaimiento de pesos encontrados por el AG.
+
+\subsection{Diagnóstico de la solución del algoritmo genético}\label{subsec:diagnostico}
+
+La \cref{tab:diagnostico-A} desglosa el error del modelo A en validación. El hallazgo principal es que el glioma está \emph{limitado por la sensibilidad}: el modelo omite el 44.2\,\% de sus píxeles, que clasifica como fondo, mientras que solo el 1.4\,\% se confunde con otro tipo de tumor. Su razón FN/FP de 2.25 indica que pierde algo más del doble de píxeles tumorales de los que marca por error. Además, en el 14.4\,\% de los cortes de glioma no se predice ningún píxel tumoral, y el Dice medio por corte de los gliomas pequeños (tercio inferior por área) es de solo 0.380, frente a 0.672 en los grandes. El problema no es reconocer el tipo de tumor, sino delimitar sus bordes difusos.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Diagnóstico por clase del modelo A (configuración del AG) en validación.}
+  \label{tab:diagnostico-A}
+  \small
+  \begin{tabular}{lcccccc}
+    \toprule
+    \textbf{Clase} & \textbf{Precisión} & \textbf{Sensibilidad} & \textbf{Dice} & \textbf{FN/FP} & \textbf{Omitido} & \textbf{Confundido} \\
+    & & & & & \textbf{como fondo} & \textbf{de tipo} \\
+    \midrule
+    Meningioma  & 0.907 & 0.821 & 0.862 & 2.13 & 11.6\,\% & 6.3\,\% \\
+    Glioma      & 0.728 & 0.544 & 0.623 & 2.25 & 44.2\,\% & 1.4\,\% \\
+    Hipofisario & 0.808 & 0.844 & 0.826 & 0.78 & 10.8\,\% & 4.8\,\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+A la luz de la \cref{eq:gradiente-ti}, la corrección natural es una pérdida que premie más la detección de los píxeles tumorales que la evitación de falsos positivos: la pérdida Focal Tversky con $\alpha=0.7>\beta=0.3$.
+
+\subsection{El sesgo de horizonte corto de la función de aptitud}\label{subsec:sesgo}
+
+La aptitud del AG mide el Dice tras tres épocas, y por tanto premia la velocidad inicial de aprendizaje y no la calidad final. Este fenómeno, conocido como \emph{sesgo de horizonte corto} en la metaoptimización~\cite{wu2018shorthorizon}, se observa con claridad en los datos de la búsqueda:
+
+\begin{itemize}
+  \item \textbf{Penaliza la capacidad.} La aptitud media de los individuos de 32 filtros (0.286) es menor que la de los de 16 (0.328). El caso más elocuente es el individuo de la segunda generación con $\eta=3.16\cdot10^{-4}$, $\lambda=1.23\cdot10^{-6}$, $F=32$ y $D=4$: tiene prácticamente la misma configuración del optimizador que la solución ganadora y, sin embargo, obtiene 0.4405 frente a 0.5085. En tres épocas, una red cuatro veces mayor aún no ha avanzado tanto en su descenso, lo que no significa que su punto final vaya a ser peor.
+  \item \textbf{Es ciega a la programación de la tasa de aprendizaje.} Con recocido coseno sobre $T=150$ épocas, la tasa tras tres épocas es el 99.9\,\% de la inicial (\cref{eq:coseno}). Cualquier beneficio de reducir el paso al final del entrenamiento es invisible para la aptitud.
+  \item \textbf{Penaliza la regularización.} El aumento de datos y las pérdidas que reequilibran precisión y sensibilidad ralentizan el ajuste inicial, aunque mejoren la generalización. Además, ninguno de ellos formaba parte del cromosoma.
+\end{itemize}
+
+De este análisis se derivan cuatro hipótesis, que se contrastaron con experimentos controlados: (H1) la pérdida Focal Tversky mejora la sensibilidad en el glioma; (H2) el aumento de datos regulariza y mejora la generalización; (H3) la tasa de aprendizaje constante provoca oscilaciones que convierten la selección del punto de control en un sorteo; y (H4) la capacidad de 16 filtros, elegida bajo el sesgo de la aptitud, limita el rendimiento final.
+
+\subsection{Fase 5: diseño factorial de la pérdida y el aumento de datos}\label{subsec:fase5}
+
+Para contrastar H1 y H2 se entrenó un diseño factorial $2\times2$ (pérdida Dice-Focal o Focal Tversky-Focal, aumento básico o avanzado; ejecuciones A, B, C y D) y, a continuación, dos ejecuciones de aislamiento que separan los bloques espacial y de intensidad del aumento avanzado (S e I). La \cref{tab:fase5} resume los resultados en validación.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Fase 5: resultados en validación (mejor punto de control). DF: Dice-Focal; FT: Focal Tversky-Focal con $\alpha=0.7$, $\beta=0.3$, $\gamma_T=4/3$. \emph{Peq.}: Dice medio por corte de los gliomas pequeños. \emph{Omit.}: porcentaje de cortes de glioma sin ningún píxel tumoral predicho.}
+  \label{tab:fase5}
+  \small
+  \setlength{\tabcolsep}{3.4pt}
+  \begin{tabular}{llcccccccc}
+    \toprule
+    & & \multicolumn{4}{c}{\textbf{Dice}} & \multicolumn{4}{c}{\textbf{Glioma}} \\
+    \cmidrule(lr){3-6}\cmidrule(lr){7-10}
+    \textbf{Ejec.} & \textbf{Aumento y pérdida} & \textbf{Medio} & \textbf{Men.} & \textbf{Gli.} & \textbf{Hip.} & \textbf{Sens.} & \textbf{FN/FP} & \textbf{Peq.} & \textbf{Omit.} \\
+    \midrule
+    A & básico, DF            & 0.7702 & \textbf{0.862} & 0.623 & 0.826 & 0.544 & 2.25 & 0.380 & 14.4\,\% \\
+    B & avanzado, DF          & 0.7595 & 0.852 & 0.629 & 0.797 & 0.584 & 1.54 & 0.390 & 14.4\,\% \\
+    C & básico, FT            & 0.7672 & 0.856 & 0.622 & 0.824 & 0.582 & 1.44 & 0.312 & 12.2\,\% \\
+    D & avanzado, FT          & 0.7675 & 0.845 & \textbf{0.683} & 0.774 & 0.662 & 1.22 & \textbf{0.426} & 10.1\,\% \\
+    \midrule
+    S & espacial avanzado, FT & \textbf{0.7751} & 0.858 & 0.640 & \textbf{0.828} & \textbf{0.694} & 0.64 & 0.404 & \textbf{8.0\,\%} \\
+    I & intensidad, FT        & 0.7454 & 0.830 & 0.618 & 0.788 & 0.568 & 1.60 & 0.360 & 17.0\,\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Los resultados permiten extraer las siguientes conclusiones:
+
+\begin{enumerate}
+  \item \textbf{La pérdida Focal Tversky desplaza el equilibrio entre precisión y sensibilidad tal como predice el análisis del gradiente (H1).} Por sí sola (C frente a A), eleva la sensibilidad del glioma en 0.038 y reduce su razón FN/FP de 2.25 a 1.44. Sin embargo, su precisión cae en 0.061 y el Dice del glioma no varía. Además, la ejecución sobreajusta: la pérdida de validación alcanza su mínimo en la época 52 y después crece de 0.137 a 0.188.
+  \item \textbf{El aumento espacial es el componente útil del aumento avanzado (H2).} Combinada con el aumento avanzado (D), la pérdida Focal Tversky produce la mayor ganancia en el glioma. El aislamiento atribuye esa ganancia al bloque espacial: frente a C, la ejecución S eleva la sensibilidad del glioma de 0.582 a 0.694, el Dice de los gliomas pequeños de 0.312 a 0.404 y reduce los cortes de glioma omitidos del 12.2\,\% al 8.0\,\%. El bloque de intensidad, en cambio, es perjudicial: la ejecución I omite más gliomas (17.0\,\%) y genera una confusión de meningioma con tumor hipofisario (el 5.9\,\% de los píxeles de meningioma) que no aparece en las demás.
+  \item \textbf{Las diferencias en Dice medio están dentro del ruido.} La mejor configuración, S (aumento espacial avanzado con Focal Tversky), supera a A en solo $+0.005$, mientras que el Dice de validación oscila entre $0.02$ y $0.03$ de una época a la siguiente. Entre las épocas 21 y 42, ambas ejecuciones tienen exactamente la misma media (0.699). La Fase 5 cambió el perfil de error del glioma, pero no el rendimiento medio. Por la misma razón, la ganancia de D en el glioma en su mejor punto de control (época 97) sobrestima el efecto: promediando épocas comparables, el aumento aporta entre 0.02 y 0.04 puntos de Dice en el glioma.
+  \item \textbf{Con aumento espacial, $\alpha=0.7$ sobrecorrige.} En S, la razón FN/FP del glioma cae a 0.64 y su precisión a 0.593: el modelo ha pasado a estar limitado por la precisión. Según la \cref{eq:gradiente-ti}, la corrección consiste en reducir el peso relativo de los falsos negativos, lo que lleva a $\alpha=0.6$ y $\beta=0.4$.
+\end{enumerate}
+
+En conjunto, siete configuraciones distintas alcanzan su mejor valor entre 0.744 y 0.775, y sus curvas suavizadas se estabilizan en torno a 0.70--0.74. Esta meseta, junto con la oscilación de una época a otra, apunta a H3 y H4: el límite no estaba en la pérdida ni en el aumento, sino en la dinámica del descenso y en la capacidad del modelo.
+
+\subsection{Fase 6: capacidad y estabilización del descenso}\label{subsec:fase6}
+
+La ejecución E combina las tres correcciones derivadas del análisis: 32 filtros base (7.24 millones de parámetros), recocido coseno de la tasa de aprendizaje sobre $T=150$ épocas y pesos Focal Tversky recalibrados ($\alpha=0.6$, $\beta=0.4$), junto con el aumento espacial avanzado y los valores de $\eta$ y $\lambda$ del AG. Como E modifica tres factores a la vez respecto a S, se entrenó también un control, E16, idéntico salvo por tener 16 filtros: la comparación E frente a E16 aísla la capacidad, y E16 frente a S aísla el recocido junto con los nuevos pesos.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{groupplot}[
+        group style={group size=1 by 2, vertical sep=0.35cm, x descriptions at=edge bottom},
+        informe,
+        xmin=0, xmax=150,
+      ]
+      \nextgroupplot[height=6.3cm, ylabel={Dice medio de validación}, ymin=0.25, ymax=0.82, legend pos=south east, legend columns=3]
+      \addplot[cgris, line width=0.8pt] table[x=epoca, y=dice_val, col sep=comma] {data/historial_A.csv};
+      \addlegendentry{A: constante, $F=16$}
+      \addplot[cazul, line width=0.8pt] table[x=epoca, y=dice_val, col sep=comma] {data/historial_E16.csv};
+      \addlegendentry{E16: coseno, $F=16$}
+      \addplot[cbermellon, line width=0.9pt] table[x=epoca, y=dice_val, col sep=comma] {data/historial_E.csv};
+      \addlegendentry{E: coseno, $F=32$}
+      \nextgroupplot[height=3.4cm, xlabel={Época}, ylabel={$\eta_e\;(\times10^{-4})$}, ymin=0, ymax=3.6, ytick={0,1,2,3}]
+      \addplot[cgris, line width=0.9pt, domain=0:100, samples=2] {3.15144};
+      \addplot[cbermellon, line width=0.9pt] table[x=epoca, y expr={\thisrow{lr}*10000}, col sep=comma] {data/historial_E.csv};
+    \end{groupplot}
+  \end{tikzpicture}
+  \caption{Arriba: Dice medio de validación por época (valores sin suavizar) con tasa de aprendizaje constante (A) y con recocido coseno (E16 y E). Abajo: tasa de aprendizaje aplicada en cada época. Al reducirse el paso, las oscilaciones desaparecen y el modelo se asienta.}
+  \label{fig:coseno}
+\end{figure}
+
+\begin{table}[htbp]
+  \centering
+  \caption{Fase 6: dinámica del entrenamiento en validación. El cambio medio entre épocas consecutivas se calcula sobre las 30 últimas épocas de cada ejecución, y la desviación típica y el rango, sobre las 20 últimas.}
+  \label{tab:dinamica}
+  \small
+  \begin{tabular}{lcccc}
+    \toprule
+    & \textbf{A} & \textbf{S} & \textbf{E16} & \textbf{E} \\
+    \midrule
+    Filtros base / programación de $\eta$ & 16 / const. & 16 / const. & 16 / coseno & 32 / coseno \\
+    Mejor época / mejor Dice medio & 64 / 0.7702 & 51 / \textbf{0.7751} & 95 / 0.7693 & 72 / 0.7612 \\
+    Cambio medio entre épocas & 0.022 & 0.030 & \textbf{0.003} & \textbf{0.003} \\
+    Desviación típica & 0.016 & 0.019 & \textbf{0.002} & \textbf{0.002} \\
+    Rango & 0.053 & 0.068 & 0.011 & \textbf{0.006} \\
+    Mejor media móvil de 5 épocas & 0.749 & 0.735 & \textbf{0.756} & 0.755 \\
+    Media de las 10 últimas épocas & 0.730 & 0.719 & 0.741 & \textbf{0.749} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+La \cref{fig:coseno} y la \cref{tab:dinamica} confirman las hipótesis H3 y H4, con matices:
+
+\begin{enumerate}
+  \item \textbf{El recocido coseno elimina las oscilaciones (H3).} El cambio medio del Dice de validación entre épocas consecutivas cae de 0.022--0.030 a 0.003, y su rango en las últimas 20 épocas de 0.05--0.07 a 0.006--0.011. La última época pasa a ser un modelo utilizable (0.749 en E), y la selección del punto de control deja de ser un sorteo. Es la predicción de la \cref{subsec:programacion}: con pasos decrecientes, los iterados dejan de oscilar alrededor del punto estacionario y se asientan en él.
+  \item \textbf{La capacidad aporta una mejora pequeña pero consistente en convergencia (H4).} En las 30 épocas finales, ya recocidas, E supera a E16 en $+0.009$ de Dice medio, gracias sobre todo al glioma ($+0.036$) y al meningioma ($+0.025$), aunque el tumor hipofisario retrocede ($-0.035$). En el mejor punto de control, en cambio, E queda por debajo de E16 (0.7612 frente a 0.7693), porque ambos picos caen en la fase intermedia, todavía ruidosa, del recocido. Gran parte de la capacidad adicional se dedica a ajustar el conjunto de entrenamiento: la pérdida de entrenamiento final es de $\approx0.02$ en ambos casos. Como el entrenamiento estaba limitado por la carga de datos, cuadruplicar los parámetros no aumentó el tiempo por época (31.2\,s en E frente a 33.3\,s en E16).
+  \item \textbf{Los pesos $\alpha=0.6$, $\beta=0.4$ equilibran el glioma, pero solo con 32 filtros.} En E, la precisión del glioma sube de 0.593 a 0.702 respecto a S, su sensibilidad apenas varía (de 0.694 a 0.679) y la razón FN/FP queda en 1.11, prácticamente equilibrada. Con los mismos pesos, E16 vuelve al perfil inicial (FN/FP de 2.10). El equilibrio depende de la combinación de pérdida y capacidad, no de $\alpha$ y $\beta$ por separado: los hiperparámetros interactúan, como se anticipó en la \cref{subsec:caracterizacion}.
+\end{enumerate}
+
+\paragraph{Resultado en el conjunto de prueba.} La comparación planificada de A frente a E en prueba (\cref{tab:prueba-E}) muestra una mejora de $+0.0412$ en Dice medio, hasta \textbf{0.8175}, el mejor resultado del proyecto con una red entrenada desde cero. La mejora se concentra de nuevo en el glioma ($+0.0876$), seguido del tumor hipofisario ($+0.0328$). Respecto a la configuración manual de referencia, la ganancia total es de $+0.127$ (un 18.4\,\% relativo), y el Dice del glioma pasa de 0.447 a 0.714.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Conjunto de prueba (592 cortes): referencia manual, configuración del AG (A) y modelo refinado (E). La evaluación de A se repitió en esta fase con un resultado prácticamente idéntico al de la \cref{tab:prueba-ag} (0.7763 frente a 0.7760).}
+  \label{tab:prueba-E}
+  \begin{tabular}{lcccc}
+    \toprule
+    \textbf{Región} & \textbf{Referencia} & \textbf{AG (A)} & \textbf{Refinado (E)} & \textbf{E $-$ A} \\
+    \midrule
+    Dice meningioma  & 0.8258 & 0.8901 & \textbf{0.8935} & $+0.0034$ \\
+    Dice glioma      & 0.4471 & 0.6259 & \textbf{0.7135} & $+0.0876$ \\
+    Dice hipofisario & 0.7985 & 0.8129 & \textbf{0.8457} & $+0.0328$ \\
+    \midrule
+    \textbf{Dice medio} & 0.6905 & 0.7763 & \textbf{0.8175} & $+0.0412$ \\
+    IoU medio        & 0.5519 & 0.6474 & \textbf{0.6982} & $+0.0508$ \\
+    Dice tumor completo & 0.6230 & 0.7237 & \textbf{0.7762} & $+0.0525$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Discrepancia entre validación y prueba.} En validación, E queda por debajo de A (0.7612 frente a 0.7702); en prueba, claramente por encima (0.8175 frente a 0.7763). La mejora del glioma es el único efecto que se replica en ambos conjuntos ($+0.068$ en validación y $+0.088$ en prueba) y, por tanto, el más creíble. Las diferencias en meningioma y tumor hipofisario cambian de signo de un conjunto a otro, lo que es coherente con la inestabilidad entre puntos de control observada en la Fase 5. La conclusión metodológica es que un conjunto de validación de 468 cortes no permite ordenar modelos con una resolución de $\pm0.01$--$0.02$. Esta limitación afecta también a la aptitud del AG, que se mide sobre ese mismo conjunto.
+
+\subsection{Síntesis: búsqueda global heurística y refinamiento guiado}\label{subsec:sintesis}
+
+El recorrido de las Fases 3 a 6 puede leerse como una búsqueda híbrida en dos etapas, análoga a un algoritmo memético. El algoritmo genético realizó una exploración global, barata y automática del espacio del optimizador y de la arquitectura, y encontró una cuenca buena: la tasa de aprendizaje y el decaimiento que se mantuvieron hasta el modelo final. El refinamiento posterior actuó como una búsqueda local guiada por diagnóstico, en dimensiones que el cromosoma no contemplaba (pérdida, aumento y programación de la tasa) y corrigiendo el sesgo de la aptitud (capacidad). Sobre el conjunto de prueba, la primera etapa aporta $+0.086$ puntos de Dice medio (unos dos tercios de la mejora) y la segunda $+0.041$ (un tercio).

@@ -1,0 +1,274 @@
+\section{Nivel interno: la U-Net como problema de optimización}\label{sec:unet}
+
+Esta sección estudia el entrenamiento de la red como lo que es en esencia: un algoritmo de optimización continua. Se formula el problema (\cref{subsec:erm}), se analiza cómo la arquitectura define el espacio de búsqueda y la geometría del paisaje (\cref{subsec:arquitectura}), se construyen las funciones objetivo sustitutas y se deriva su gradiente (\cref{subsec:perdidas}), se describe el cálculo exacto de ese gradiente por retropropagación (\cref{subsec:retropropagacion}) y, finalmente, se detallan el método de descenso y la programación de su tamaño de paso (\cref{subsec:adam,subsec:programacion}).
+
+\subsection{Formulación: minimización del riesgo empírico}\label{subsec:erm}
+
+Sea $\Dtrain = \{(\vx_n,\vy_n)\}_{n=1}^{N}$ el conjunto de entrenamiento, con $N=2004$ cortes de $\Omega = 256\times256$ píxeles. La red define una función $f_{\vtheta}:\R^{H\times W}\to\R^{C\times H\times W}$ que asigna a cada píxel $i$ un vector de $C=4$ \emph{logits} $\vz_i$, transformados en probabilidades mediante la función \emph{softmax}:
+\begin{equation}\label{eq:softmax}
+  p_{i,c} = \frac{\exp(z_{i,c})}{\sum_{k=0}^{C-1}\exp(z_{i,k})}, \qquad c \in \{0,\dots,C-1\}.
+\end{equation}
+El entrenamiento resuelve el problema de minimización del riesgo empírico regularizado
+\begin{equation}\label{eq:erm}
+  \min_{\vtheta\in\R^{d}} \; J(\vtheta) = \frac{1}{N}\sum_{n=1}^{N} \Loss\bigl(f_{\vtheta}(\vx_n),\vy_n\bigr) + \frac{\lambda}{2}\,\lVert\vtheta\rVert_2^2,
+\end{equation}
+donde $\Loss$ es la función de pérdida y $\lambda$ el coeficiente de decaimiento de pesos. Este problema tiene cuatro rasgos que lo distinguen de la optimización clásica y que justifican las técnicas empleadas:
+
+\begin{enumerate}
+  \item \textbf{Dimensión muy alta.} El vector de decisión $\vtheta$ tiene $d \approx 1.81\cdot10^{6}$ componentes para la red de 16 filtros y $d \approx 7.24\cdot10^{6}$ para la de 32. Cualquier método que requiera la matriz hessiana, de tamaño $d\times d$, es inviable; solo son practicables los métodos de primer orden.
+  \item \textbf{No convexidad.} $J$ es la composición de decenas de transformaciones no lineales. Presenta múltiples mínimos locales, puntos de silla y simetrías (permutar los filtros de una capa no altera la función), de modo que no se busca el mínimo global sino un punto estacionario de buena calidad.
+  \item \textbf{Estocasticidad.} Evaluar $J$ exactamente exige recorrer todo el conjunto. En su lugar, en cada iteración se estima el gradiente sobre un minilote $\mathcal{B}$ de $|\mathcal{B}|=8$ imágenes,
+  \begin{equation}\label{eq:gradiente-estocastico}
+    \hat{\vg}(\vtheta) = \frac{1}{|\mathcal{B}|}\sum_{n\in\mathcal{B}} \nabla_{\vtheta}\Loss\bigl(f_{\vtheta}(\vx_n),\vy_n\bigr) + \lambda\vtheta,
+    \qquad \E_{\mathcal{B}}\bigl[\hat{\vg}(\vtheta)\bigr] = \nabla J(\vtheta),
+  \end{equation}
+  un estimador insesgado pero ruidoso. Con $N=2004$ y $|\mathcal{B}|=8$, cada época consta de 251 iteraciones de descenso.
+  \item \textbf{La métrica de interés no es diferenciable.} El coeficiente Dice de la \cref{eq:dice} se calcula sobre la predicción discreta $\hat{y}_i=\argmax_c p_{i,c}$, que es constante a trozos en $\vtheta$: su gradiente es nulo en casi todo punto. Es imprescindible optimizar una \emph{función sustituta} diferenciable que se correlacione con el Dice (\cref{subsec:perdidas}).
+\end{enumerate}
+
+Además, el objetivo final no es minimizar $J$ sobre $\Dtrain$, sino generalizar a pacientes nuevos. Por ello, la trayectoria de optimización se supervisa con el conjunto de validación y se conserva el iterado con mayor Dice de validación, una forma de parada temprana que actúa como regularización implícita.
+
+\subsection{La arquitectura como parametrización del espacio de búsqueda}\label{subsec:arquitectura}
+
+La arquitectura determina qué funciones puede representar la red y, por tanto, el espacio en el que el optimizador busca. Se ha implementado una U-Net~\cite{ronneberger2015unet} con dos hiperparámetros estructurales, el número de filtros base $F$ y la profundidad $D$, que el algoritmo genético de la \cref{sec:ag} puede modificar sin alterar el código (\cref{fig:unet}).
+
+\begin{itemize}
+  \item \textbf{Codificador (contracción).} Consta de $D$ niveles. El nivel $\ell\in\{0,\dots,D-1\}$ aplica un bloque doble $(\text{Conv}\,3{\times}3 \to \text{BN} \to \text{ReLU})\times2$ con $2^{\ell}F$ canales y reduce después la resolución a la mitad mediante \emph{max pooling} $2\times2$. A medida que la resolución disminuye, el campo receptivo crece y los mapas de características codifican información más contextual.
+  \item \textbf{Cuello de botella.} Un bloque doble con $2^{D}F$ canales a resolución $256/2^{D}$.
+  \item \textbf{Decodificador (expansión).} Cada nivel duplica la resolución por interpolación bilineal, proyecta a $2^{\ell}F$ canales con una convolución $1\times1$, concatena las características del nivel homólogo del codificador y aplica un bloque doble.
+  \item \textbf{Clasificador.} Una convolución $1\times1$ produce los $C=4$ logits por píxel.
+\end{itemize}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+      font=\small,
+      enc/.style={draw=cazul!75!black, fill=cazul!20, rounded corners=1pt, inner sep=0pt},
+      dec/.style={draw=cverde!70!black, fill=cverde!20, rounded corners=1pt, inner sep=0pt},
+      bot/.style={draw=cpurpura!80!black, fill=cpurpura!25, rounded corners=1pt, inner sep=0pt},
+      cls/.style={draw=cnaranja!80!black, fill=cnaranja!35, rounded corners=1pt, inner sep=0pt},
+      lbl/.style={font=\scriptsize, align=center, text=black!80},
+      pool/.style={-{Stealth[length=2.2mm]}, line width=0.9pt, draw=cbermellon},
+      up/.style={-{Stealth[length=2.2mm]}, line width=0.9pt, draw=cverde!80!black},
+      skip/.style={-{Stealth[length=2mm]}, line width=0.7pt, draw=cgris, dashed},
+      flow/.style={-{Stealth[length=2mm]}, line width=0.7pt, draw=black!70},
+      grad/.style={-{Stealth[length=2.4mm]}, line width=1pt, draw=cbermellon!85!black, densely dashed},
+    ]
+    \node[enc, minimum width=0.28cm, minimum height=1.50cm] (e0) at (1.0,  0.00) {};
+    \node[enc, minimum width=0.40cm, minimum height=1.20cm] (e1) at (2.0, -1.45) {};
+    \node[enc, minimum width=0.55cm, minimum height=0.95cm] (e2) at (3.0, -2.90) {};
+    \node[enc, minimum width=0.72cm, minimum height=0.75cm] (e3) at (4.0, -4.35) {};
+    \node[bot, minimum width=0.95cm, minimum height=0.60cm] (b)  at (5.4, -5.80) {};
+    \node[dec, minimum width=0.72cm, minimum height=0.75cm] (d3) at (6.8, -4.35) {};
+    \node[dec, minimum width=0.55cm, minimum height=0.95cm] (d2) at (7.8, -2.90) {};
+    \node[dec, minimum width=0.40cm, minimum height=1.20cm] (d1) at (8.8, -1.45) {};
+    \node[dec, minimum width=0.28cm, minimum height=1.50cm] (d0) at (9.8,  0.00) {};
+    \node[cls, minimum width=0.20cm, minimum height=1.50cm] (c)  at (10.9, 0.00) {};
+
+    \node[lbl, anchor=north east] at ($(e0.south west)+(-0.12,0)$) {$F$\\$256^2$};
+    \node[lbl, anchor=north west] at ($(d0.south east)+(0.02,0)$) {$F$\\$256^2$};
+    \node[lbl, left=3pt of e1] {$2F$\\$128^2$};
+    \node[lbl, left=3pt of e2] {$4F$\\$64^2$};
+    \node[lbl, left=3pt of e3] {$8F$\\$32^2$};
+    \node[lbl, below=3pt of b] {$16F$, $16^2$\\cuello de botella};
+    \node[lbl, right=3pt of d3] {$8F$\\$32^2$};
+    \node[lbl, right=3pt of d2] {$4F$\\$64^2$};
+    \node[lbl, right=3pt of d1] {$2F$\\$128^2$};
+    \node[lbl, above=2pt of c] {Conv $1{\times}1$};
+
+    \node[draw=black!60, fill=black!8, minimum size=0.9cm, align=center, font=\small] (x) at (-0.65,0) {$\vx$};
+    \node[lbl, below=2pt of x] {$1\times256^2$};
+    \node[align=center, right=0.55cm of c] (p) {$\vp$};
+    \node[lbl, below=2pt of p] {$4\times256^2$\\softmax};
+    \node[draw=cbermellon!85!black, fill=cbermellon!10, rounded corners=2pt, inner sep=4pt, right=0.55cm of p] (L) {$\Loss(\vp,\vy)$};
+    \node[align=center, below=0.75cm of L, font=\small] (y) {$\vy$};
+    \node[lbl, below=1pt of y] {máscara real};
+
+    \draw[flow] (x.east) -- (e0.west);
+    \draw[flow] (d0.east) -- (c.west);
+    \draw[flow] (c.east) -- (p.west);
+    \draw[flow] (p.east) -- (L.west);
+    \draw[flow] (y.north) -- (L.south);
+
+    \draw[pool] (e0.south) -- (e1.north);
+    \draw[pool] (e1.south) -- (e2.north);
+    \draw[pool] (e2.south) -- (e3.north);
+    \draw[pool] (e3.south) -- (b.north west);
+    \draw[up] (b.north east) -- (d3.south);
+    \draw[up] (d3.north) -- (d2.south);
+    \draw[up] (d2.north) -- (d1.south);
+    \draw[up] (d1.north) -- (d0.south);
+
+    \draw[skip] (e0.east) -- (d0.west);
+    \draw[skip] (e1.east) -- (d1.west);
+    \draw[skip] (e2.east) -- (d2.west);
+    \draw[skip] (e3.east) -- (d3.west);
+
+    \draw[grad] (L.north) -- ++(0,1.05) -| ($(e0.north)+(0,0.05)$);
+    \node[font=\scriptsize, text=cbermellon!85!black, fill=white, inner sep=2pt] at (6.2,1.80) {retropropagación: $\nabla_{\vtheta}\Loss$ alcanza todas las capas a través de ambos caminos};
+
+    \draw[decorate, decoration={brace, mirror, amplitude=5pt}, draw=black!60] (0.7,-5.25) -- (4.3,-5.25) node[midway, below=6pt, lbl] {codificador};
+    \draw[decorate, decoration={brace, mirror, amplitude=5pt}, draw=black!60] (6.5,-5.25) -- (10.1,-5.25) node[midway, below=6pt, lbl] {decodificador};
+
+    \node[enc, minimum width=0.25cm, minimum height=0.40cm] (le1) at (1.2,-7.3) {};
+    \node[lbl, right=3pt of le1] (lt1) {bloque doble $(\text{Conv}\,3{\times}3\text{--BN--ReLU})\times2$};
+    \coordinate[right=0.7cm of lt1] (la2);
+    \coordinate[right=0.7cm of la2] (lb2);
+    \draw[pool] (la2) -- (lb2);
+    \node[lbl, right=3pt of lb2] {\emph{max pooling} $2{\times}2$};
+    \coordinate (la3) at (1.05,-7.85);
+    \coordinate[right=0.7cm of la3] (lb3);
+    \draw[up] (la3) -- (lb3);
+    \node[lbl, right=3pt of lb3] (lt3) {interpolación bilineal $\times2$ + Conv $1{\times}1$};
+    \coordinate[right=0.7cm of lt3] (la4);
+    \coordinate[right=0.7cm of la4] (lb4);
+    \draw[skip] (la4) -- (lb4);
+    \node[lbl, right=3pt of lb4] {conexión de salto (concatenación)};
+  \end{tikzpicture}
+  \caption{Arquitectura U-Net implementada, mostrada para la profundidad $D=4$ seleccionada por el algoritmo genético. Junto a cada bloque se indican el número de canales (en función de los filtros base $F\in\{8,16,32\}$) y la resolución espacial. La línea discontinua superior representa el flujo del gradiente durante la retropropagación: las conexiones de salto ofrecen a cada nivel del codificador un segundo camino, corto, por el que recibir la señal de error.}
+  \label{fig:unet}
+\end{figure}
+
+Desde el punto de vista de la optimización, cada componente de la arquitectura cumple una función precisa:
+
+\begin{itemize}
+  \item \textbf{Conexiones de salto.} Si $\mathbf{h}_{\ell}$ es la salida del nivel $\ell$ del codificador, esta alimenta tanto al nivel inferior como, por concatenación, al nivel homólogo del decodificador. Por la regla de la cadena multivariable, su gradiente es la suma de ambas contribuciones,
+  \begin{equation}\label{eq:gradiente-salto}
+    \frac{\partial\Loss}{\partial\mathbf{h}_{\ell}} = \underbrace{\frac{\partial\Loss}{\partial\mathbf{h}_{\ell}}\bigg|_{\text{camino profundo}}}_{\text{atraviesa } 2(D-\ell) \text{ bloques}} + \underbrace{\frac{\partial\Loss}{\partial\mathbf{h}_{\ell}}\bigg|_{\text{salto}}}_{\text{camino corto}},
+  \end{equation}
+  de modo que los primeros niveles reciben una señal de error que no se atenúa al atravesar toda la red. Esto mitiga el desvanecimiento del gradiente y permite optimizar a la vez el contexto global y el detalle espacial fino que exige la delimitación de bordes.
+  \item \textbf{Normalización por lotes.} Normaliza las preactivaciones con las estadísticas del minilote y las reescala con parámetros aprendidos~\cite{ioffe2015batchnorm}. Esta reparametrización mejora el condicionamiento del problema y tolera tasas de aprendizaje mayores. Las convoluciones prescinden del sesgo, que queda absorbido por el desplazamiento de la normalización.
+  \item \textbf{Inicialización de He.} Los pesos convolucionales se inicializan con varianza $2/n_{\mathrm{in}}$~\cite{he2015delving}, lo que conserva la varianza de las activaciones a través de las capas ReLU. El punto de partida del descenso se sitúa así en una región donde los gradientes ni explotan ni se anulan.
+  \item \textbf{Interpolación bilineal con proyección $1\times1$.} Sustituye a la convolución traspuesta y evita los artefactos en damero que esta puede dejar en la máscara.
+\end{itemize}
+
+El número de parámetros crece aproximadamente como $F^{2}$ y como $4^{D}$, porque cada convolución $3\times3$ entre $a$ y $b$ canales aporta $9ab$ pesos. Para $D=4$, la red tiene $1\,811\,780$ parámetros con $F=16$ y $7\,240\,324$ con $F=32$, exactamente cuatro veces más. La \cref{tab:parametros} de la \cref{sec:ag} muestra el tamaño de todas las arquitecturas del espacio de búsqueda.
+
+\subsection{Funciones de pérdida: objetivos sustitutos diferenciables}\label{subsec:perdidas}
+
+Sean $\vp_{c}$ y $\vg_{c}$ los mapas de probabilidad y la codificación \emph{one-hot} de la clase $c$ sobre todos los píxeles del minilote. Todas las pérdidas de región se calculan con agregación a nivel de minilote, excluyen el fondo y promedian solo sobre el conjunto $\mathcal{C}_{\mathcal{B}}$ de clases tumorales presentes en el minilote. Este último detalle es necesario porque cada corte contiene un único tipo de tumor: una clase ausente del minilote no aporta información de solapamiento y, si se incluyera, contaría como una predicción perfecta que diluiría la pérdida.
+
+\paragraph{Dice suave.} Se obtiene sustituyendo las predicciones discretas por probabilidades en la \cref{eq:dice}~\cite{milletari2016vnet}:
+\begin{equation}\label{eq:dice-suave}
+  \Loss_{\mathrm{Dice}} = 1 - \frac{1}{|\mathcal{C}_{\mathcal{B}}|}\sum_{c\in\mathcal{C}_{\mathcal{B}}} \frac{2\sum_i p_{i,c}\,g_{i,c} + \varepsilon}{\sum_i p_{i,c} + \sum_i g_{i,c} + \varepsilon}, \qquad \varepsilon = 10^{-5}.
+\end{equation}
+Al ser un cociente de sumas sobre todos los píxeles, es insensible a la proporción entre fondo y tumor: mide solapamiento relativo y no cuenta los verdaderos negativos, que son abrumadoramente mayoritarios.
+
+\paragraph{Pérdida focal.} Es una entropía cruzada reponderada~\cite{lin2017focal}:
+\begin{equation}\label{eq:focal}
+  \Loss_{\mathrm{Focal}} = -\frac{1}{|\Omega_{\mathcal{B}}|}\sum_{i} \bigl(1-p_{i,y_i}\bigr)^{\gamma}\,\log p_{i,y_i}, \qquad \gamma = 2.
+\end{equation}
+El factor modulador $(1-p_{i,y_i})^{\gamma}$ reduce la contribución de los píxeles ya bien clasificados: un píxel de fondo con $p=0.9$ pesa $0.01$, cien veces menos que en la entropía cruzada (el caso $\gamma=0$). Como la inmensa mayoría de los píxeles son fondo fácil, el gradiente se concentra en los píxeles difíciles, típicamente los bordes de la lesión.
+
+\paragraph{Pérdida Focal Tversky.} El índice de Tversky~\cite{tversky1977features,salehi2017tversky} generaliza el Dice ponderando por separado los dos tipos de error. Con recuentos suaves $\mathrm{TP}_c=\sum_i p_{i,c}g_{i,c}$, $\mathrm{FN}_c=\sum_i(1-p_{i,c})g_{i,c}$ y $\mathrm{FP}_c=\sum_i p_{i,c}(1-g_{i,c})$,
+\begin{equation}\label{eq:tversky}
+  \mathrm{TI}_c = \frac{\mathrm{TP}_c}{\mathrm{TP}_c + \alpha\,\mathrm{FN}_c + \beta\,\mathrm{FP}_c},
+  \qquad
+  \Loss_{\mathrm{FT}} = \frac{1}{|\mathcal{C}_{\mathcal{B}}|}\sum_{c\in\mathcal{C}_{\mathcal{B}}} \bigl(1-\mathrm{TI}_c\bigr)^{\gamma_{T}}.
+\end{equation}
+Con $\alpha=\beta=0.5$ y $\gamma_T=1$ se recupera el Dice suave. La variante focal~\cite{abraham2019focaltversky} con $\gamma_T=4/3$ concentra el esfuerzo en las clases peor segmentadas.
+
+\paragraph{Combinación por penalización.} Las pérdidas de región optimizan directamente el solapamiento, pero su gradiente es inestable al principio del entrenamiento, cuando el solapamiento es casi nulo. La pérdida focal aporta un gradiente suave y local en cada píxel. Ambas se combinan por escalarización ponderada, el método clásico de penalización para objetivos múltiples:
+\begin{equation}\label{eq:combinada}
+  \Loss = w_{r}\,\Loss_{\text{región}} + w_{p}\,\Loss_{\mathrm{Focal}}, \qquad w_r = w_p = 0.5,
+\end{equation}
+donde $\Loss_{\text{región}}$ es $\Loss_{\mathrm{Dice}}$ (pérdida \emph{Dice-Focal}, Fases 2--4) o $\Loss_{\mathrm{FT}}$ (pérdida \emph{Focal Tversky-Focal}, Fases 5--7).
+
+\subsubsection{Análisis del gradiente de la pérdida Focal Tversky}\label{subsubsec:gradiente-tversky}
+
+El comportamiento de la pérdida durante el descenso se entiende derivándola. Sea $G_c=\sum_i g_{i,c}$ el número de píxeles reales de la clase, constante respecto a $\vtheta$, de modo que $\mathrm{FN}_c = G_c - \mathrm{TP}_c$, y sea $S_c = \mathrm{TP}_c + \alpha\mathrm{FN}_c + \beta\mathrm{FP}_c$ el denominador de la \cref{eq:tversky}. Derivando respecto a la probabilidad de un píxel se obtienen dos casos:
+\begin{equation}\label{eq:gradiente-ti}
+  \frac{\partial\,\mathrm{TI}_c}{\partial p_{i,c}} =
+  \begin{cases}
+    \dfrac{\alpha\,G_c + \beta\,\mathrm{FP}_c}{S_c^{2}} > 0 & \text{si } g_{i,c}=1 \quad\text{(píxel tumoral)},\\[3mm]
+    -\dfrac{\beta\,\mathrm{TP}_c}{S_c^{2}} < 0 & \text{si } g_{i,c}=0 \quad\text{(píxel de fondo)}.
+  \end{cases}
+\end{equation}
+La lectura es directa. El incentivo para elevar la probabilidad de un píxel tumoral no detectado crece con $\alpha$, y la penalización por marcar un píxel de fondo crece con $\beta$. Elegir $\alpha>\beta$ inclina, por tanto, el óptimo hacia una mayor sensibilidad a costa de precisión. Esta relación analítica es la base cuantitativa de las decisiones de las Fases 5 y 6 (\cref{sec:refinamiento}), en las que $\alpha$ y $\beta$ se calibran a partir de la razón FN/FP observada.
+
+El exponente focal actúa a nivel de clase. Por la regla de la cadena,
+\begin{equation}\label{eq:gradiente-focal-tversky}
+  \frac{\partial\Loss_{\mathrm{FT}}}{\partial\,\mathrm{TI}_c} = -\frac{\gamma_T}{|\mathcal{C}_{\mathcal{B}}|}\,\bigl(1-\mathrm{TI}_c\bigr)^{\gamma_T-1}.
+\end{equation}
+Con $\gamma_T=4/3>1$, el factor $(1-\mathrm{TI}_c)^{1/3}$ crece con el error. Una clase con $\mathrm{TI}_c\approx0.6$, como el glioma, recibe $(0.40/0.11)^{1/3}\approx1.5$ veces el gradiente de una clase con $\mathrm{TI}_c\approx0.89$, como el meningioma. La pérdida redirige automáticamente el esfuerzo de optimización hacia la clase cuello de botella.
+
+Por último, el gradiente se propaga a los logits a través del jacobiano de la \emph{softmax}, $\partial p_{i,c}/\partial z_{i,k} = p_{i,c}(\delta_{ck}-p_{i,k})$, de modo que
+\begin{equation}\label{eq:gradiente-logits}
+  \frac{\partial\Loss}{\partial z_{i,k}} = \sum_{c} \frac{\partial\Loss}{\partial p_{i,c}}\; p_{i,c}\bigl(\delta_{ck}-p_{i,k}\bigr),
+\end{equation}
+que es el vector de error inicial a partir del cual comienza la retropropagación.
+
+\subsection{Retropropagación: cálculo exacto del gradiente}\label{subsec:retropropagacion}
+
+La red es un grafo acíclico dirigido de operaciones diferenciables (o diferenciables a trozos). Escribiendo cada capa como $\mathbf{a}^{(l)} = f_l(\mathbf{a}^{(l-1)};\vtheta_l)$ y definiendo el error $\bm{\delta}^{(l)} = \partial\Loss/\partial\mathbf{a}^{(l)}$, la retropropagación~\cite{rumelhart1986backprop} aplica recursivamente la regla de la cadena en sentido inverso:
+\begin{equation}\label{eq:backprop}
+  \bm{\delta}^{(l-1)} = \Bigl(\frac{\partial f_l}{\partial\mathbf{a}^{(l-1)}}\Bigr)^{\!\top}\bm{\delta}^{(l)},
+  \qquad
+  \nabla_{\vtheta_l}\Loss = \Bigl(\frac{\partial f_l}{\partial\vtheta_l}\Bigr)^{\!\top}\bm{\delta}^{(l)}.
+\end{equation}
+Nunca se forman jacobianos explícitos: cada operación implementa su producto jacobiano-vector traspuesto. En una convolución, la propagación del error equivale a una convolución con el núcleo invertido, y el gradiente del núcleo es la correlación entre las activaciones de entrada y el error de salida. En la ReLU, el error se multiplica por el indicador $\mathbb{1}[\mathbf{a}>0]$. En el \emph{max pooling}, el error se encamina hacia la posición que contenía el máximo (un subgradiente). Cuando un tensor alimenta a varios consumidores, como en las conexiones de salto, los errores se suman (\cref{eq:gradiente-salto}).
+
+La propiedad decisiva para la optimización es su coste: una pasada hacia atrás cuesta del orden de dos pasadas hacia delante, \emph{independientemente de} $d$~\cite{goodfellow2016deep}. Estimar el mismo gradiente por diferencias finitas exigiría $d+1\approx7\cdot10^{6}$ evaluaciones de la red. La retropropagación es lo que hace factible el descenso de gradiente en millones de variables.
+
+Para acelerar el cálculo se emplea precisión mixta~\cite{micikevicius2018mixed}: la pasada hacia delante se ejecuta en media precisión donde es seguro, pero la pérdida se evalúa en precisión simple, ya que la constante $\varepsilon=10^{-5}$ de las \cref{eq:dice-suave,eq:tversky} es subnormal en media precisión y perdería exactitud. Para evitar que los gradientes pequeños se anulen, se retropropaga $s\cdot\Loss$ con un factor de escala dinámico $s$ y los gradientes se dividen por $s$ antes de actualizar los pesos.
+
+\subsection{Método de descenso: Adam con regularización \texorpdfstring{$L_2$}{L2}}\label{subsec:adam}
+
+El descenso de gradiente estocástico~\cite{robbins1951stochastic} actualiza $\vtheta_{t+1}=\vtheta_t-\eta\,\hat{\vg}_t$. En este trabajo se usa su variante adaptativa Adam~\cite{kingma2015adam}, que en la iteración $t$ calcula
+\begin{equation}\label{eq:adam}
+  \begin{aligned}
+    \vg_t &= \hat{\vg}(\vtheta_{t-1}) \quad\text{(incluye } \lambda\vtheta_{t-1}\text{)}, &
+    \mathbf{m}_t &= \beta_1\mathbf{m}_{t-1} + (1-\beta_1)\,\vg_t, &
+    \mathbf{v}_t &= \beta_2\mathbf{v}_{t-1} + (1-\beta_2)\,\vg_t^{2},\\
+    \hat{\mathbf{m}}_t &= \frac{\mathbf{m}_t}{1-\beta_1^{t}}, &
+    \hat{\mathbf{v}}_t &= \frac{\mathbf{v}_t}{1-\beta_2^{t}}, &
+    \vtheta_t &= \vtheta_{t-1} - \eta\,\frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t}+\epsilon},
+  \end{aligned}
+\end{equation}
+con $\beta_1=0.9$, $\beta_2=0.999$ y $\epsilon=10^{-8}$, y con todas las operaciones vectoriales componente a componente. El primer momento $\mathbf{m}_t$ es un término de inercia que promedia el ruido del gradiente estocástico. El segundo momento $\mathbf{v}_t$ actúa como un precondicionador diagonal que normaliza la escala de cada coordenada. El resultado es que el desplazamiento de cada peso por iteración queda acotado aproximadamente por $\eta$, lo que convierte a la \emph{tasa de aprendizaje} en el hiperparámetro más influyente del proceso: fija el tamaño del paso en el espacio de parámetros.
+
+El decaimiento de pesos se implementa, como en PyTorch, sumando $\lambda\vtheta$ al gradiente; es decir, como el gradiente de la penalización $L_2$ de la \cref{eq:erm}. Como este término atraviesa después la normalización adaptativa, su efecto regularizador es más débil y menos uniforme que el del decaimiento desacoplado~\cite{loshchilov2019adamw}. Este matiz ayuda a interpretar la elección del algoritmo genético en la \cref{subsec:resultados-ag}.
+
+En suma, el algoritmo de optimización interno queda completamente determinado por cuatro magnitudes que no se aprenden por gradiente: la tasa de aprendizaje $\eta$ y el decaimiento $\lambda$, que gobiernan el método de descenso, y los filtros $F$ y la profundidad $D$, que definen el espacio de búsqueda. Estas cuatro magnitudes forman el cromosoma del algoritmo genético de la \cref{sec:ag}.
+
+\subsection{Programación de la tasa de aprendizaje}\label{subsec:programacion}
+
+Con una tasa constante, el descenso estocástico no converge a un punto: los iterados oscilan en un entorno del punto estacionario cuyo radio crece con $\eta$ y con la varianza del gradiente. En la práctica, esto se traduce en fluctuaciones del Dice de validación de una época a la siguiente, que convierten la selección del mejor punto de control en un sorteo. El \emph{recocido coseno}~\cite{loshchilov2017sgdr}, en su versión sin reinicios, reduce la tasa a lo largo del entrenamiento según
+\begin{equation}\label{eq:coseno}
+  \eta_e = \frac{\eta_0}{2}\Bigl(1+\cos\frac{\pi e}{T}\Bigr), \qquad e = 0,1,\dots,T-1,
+\end{equation}
+donde $e$ es la época y $T$ el número total de épocas. Se dan pasos grandes al principio, que exploran distintas cuencas del paisaje, y pasos cada vez menores al final, que reducen el ruido y permiten asentarse en el fondo de la cuenca. La analogía con la temperatura del recocido simulado es deliberada: en ambos casos, un parámetro que decrece con el tiempo regula la transición de la exploración a la explotación. Esta técnica se incorpora en la Fase 6 (\cref{sec:refinamiento}).
+
+\subsection{Comportamiento observado del proceso de optimización}\label{subsec:comportamiento}
+
+La \cref{fig:perdidas} muestra la evolución de la función objetivo para dos ejecuciones que comparten arquitectura ($F=16$, $D=4$), pérdida (Dice-Focal), optimizador y datos, y que solo difieren en los hiperparámetros del optimizador: la configuración manual de referencia ($\eta=10^{-3}$, $\lambda=10^{-4}$) y la encontrada por el algoritmo genético ($\eta=3.15\cdot10^{-4}$, $\lambda=1.91\cdot10^{-6}$).
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+        informe,
+        height=6.4cm,
+        xlabel={Época},
+        ylabel={Pérdida Dice-Focal},
+        xmin=0, xmax=100, ymin=0, ymax=0.6,
+        legend pos=north east,
+        legend columns=2,
+      ]
+      \addplot[cazul, line width=1.1pt] table[x=epoca, y=perdida_train, col sep=comma] {data/historial_base.csv};
+      \addlegendentry{Referencia, entrenamiento}
+      \addplot[cazul, line width=1.1pt, densely dashed] table[x=epoca, y=perdida_val, col sep=comma] {data/historial_base.csv};
+      \addlegendentry{Referencia, validación}
+      \addplot[cbermellon, line width=1.1pt] table[x=epoca, y=perdida_train, col sep=comma] {data/historial_A.csv};
+      \addlegendentry{AG (A), entrenamiento}
+      \addplot[cbermellon, line width=1.1pt, densely dashed] table[x=epoca, y=perdida_val, col sep=comma] {data/historial_A.csv};
+      \addlegendentry{AG (A), validación}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Evolución de la función objetivo para la configuración manual de referencia (40 épocas) y la configuración del algoritmo genético (100 épocas), con idéntica arquitectura y pérdida. La configuración del AG, con una tasa de aprendizaje tres veces menor, desciende más rápido: en la época 10, su pérdida de entrenamiento es 0.188 frente a 0.282.}
+  \label{fig:perdidas}
+\end{figure}
+
+La figura ilustra tres propiedades del proceso. Primero, el descenso es eficaz: la pérdida de entrenamiento cae desde $\approx0.55$ hasta $0.18$ (referencia, época 40) y $0.08$ (configuración del AG, época 100). Segundo, es estocástico: la pérdida de entrenamiento aumenta respecto a la época anterior en 10 de las 39 transiciones de la referencia y en 40 de las 99 de la configuración del AG, y la de validación oscila aún más. Tercero, y más importante para este trabajo, la relación entre hiperparámetros y convergencia no es intuitiva. Una tasa de aprendizaje \emph{menor}, combinada con un decaimiento de pesos casi nulo, produce un descenso \emph{más rápido}: en la época 40, la configuración del AG alcanza una pérdida de entrenamiento de 0.119 frente a 0.180 y una pérdida mínima de validación de 0.184 frente a 0.228. La interpretación más plausible es que el paso de $10^{-3}$ es excesivo para este paisaje y provoca oscilaciones que frenan el progreso, aunque parte de la diferencia puede deberse a la penalización $L_2$ más intensa de la referencia; con una sola ejecución de cada configuración no es posible separar ambos efectos.
+
+Si con la misma red, la misma función objetivo y el mismo optimizador dos elecciones de $(\eta,\lambda)$ conducen a trayectorias y puntos finales tan distintos, y si esa relación no es monótona ni predecible a priori, la elección de los hiperparámetros es en sí misma un problema de optimización. A ese segundo nivel se dedica la siguiente sección.

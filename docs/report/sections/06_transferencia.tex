@@ -1,0 +1,35 @@
+\section{Complemento: transferencia de aprendizaje}\label{sec:transferencia}
+
+Como experimento adicional, ajeno al núcleo de optimización del trabajo, se evaluó si un extractor de características externo puede superar los límites intrínsecos de un conjunto de datos pequeño. La ejecución F sustituye el codificador entrenado desde cero por una ResNet34~\cite{he2016resnet} preentrenada en ImageNet~\cite{deng2009imagenet}, integrada en una U-Net de la biblioteca Segmentation Models PyTorch~\cite{iakubovskii2019smp} con un único canal de entrada y cuatro clases de salida (24.43 millones de parámetros). El resto de la configuración se hereda de E: aumento espacial avanzado, pérdida Focal Tversky-Focal con $\alpha=0.6$ y $\beta=0.4$, recocido coseno (100 épocas) y la tasa de aprendizaje y el decaimiento del AG. La única adaptación es una tasa de aprendizaje diferenciada: el decodificador usa la tasa del AG ($3.15\cdot10^{-4}$) y el codificador preentrenado una diez veces menor, para que los gradientes grandes y ruidosos del decodificador recién inicializado no destruyan las características de ImageNet en las primeras épocas.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Modelo refinado entrenado desde cero (E) frente al modelo con codificador preentrenado (F). Los intervalos son percentiles al 95\,\% sobre 10\,000 remuestreos pareados de los 46 pacientes de prueba, estratificados por tipo de tumor.}
+  \label{tab:transferencia}
+  \small
+  \begin{tabular}{lcccc}
+    \toprule
+    & \textbf{E (desde cero)} & \textbf{F (ResNet34)} & \textbf{F $-$ E} & \textbf{IC 95\,\%} \\
+    \midrule
+    Dice medio en validación  & 0.7612 & \textbf{0.8221} & $+0.061$ & -- \\
+    \midrule
+    Dice meningioma (prueba)  & 0.8935 & \textbf{0.9221} & $+0.029$ & $[+0.008,\,+0.074]$ \\
+    Dice glioma (prueba)      & \textbf{0.7135} & 0.6855 & $-0.028$ & $[-0.066,\,+0.004]$ \\
+    Dice hipofisario (prueba) & 0.8457 & \textbf{0.8672} & $+0.022$ & $[-0.004,\,+0.046]$ \\
+    \textbf{Dice medio (prueba)} & 0.8175 & \textbf{0.8250} & $+0.007$ & $[-0.010,\,+0.029]$ \\
+    \midrule
+    Épocas hasta Dice val. $\geq0.75$ & 49 & \textbf{7} & & \\
+    Tiempo de entrenamiento & 78 min & \textbf{47 min} & & \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+La \cref{tab:transferencia} resume los resultados, que admiten tres lecturas:
+
+\begin{itemize}
+  \item \textbf{En Dice medio, E y F están estadísticamente empatados.} F obtiene 0.8250 en prueba (intervalo de confianza al 95\,\% de $[0.785,\,0.852]$), pero su ventaja sobre E, $+0.007$, tiene un intervalo que incluye el cero. La gran ventaja en validación ($+0.061$) no se traslada a prueba, lo que confirma de nuevo que el conjunto de validación es un instrumento optimista.
+  \item \textbf{Las características externas resuelven el reconocimiento del tipo de tumor.} La confusión de tumor hipofisario con meningioma en validación cae del 18.4\,\% al 4.2\,\%, y en prueba ninguna confusión entre tipos supera el 1\,\% de los píxeles. La mejora en meningioma es significativa. Es el beneficio más claro de ImageNet: un contexto global más rico para distinguir lesiones de apariencia parecida.
+  \item \textbf{No mejoran la delimitación del glioma.} F es más conservador: su precisión en el glioma sube (0.894 en prueba) pero su sensibilidad cae (0.556), con una razón FN/FP de 6.7, y empeora en 12 de los 18 pacientes con glioma. Los bordes infiltrativos siguen siendo el límite, posiblemente porque un único corte T1-CE ofrece una señal débil para delimitarlos.
+\end{itemize}
+
+La ventaja inequívoca es la eficiencia: F alcanza un Dice de validación de 0.75 en la época 7, frente a la 49 de E, y termina su entrenamiento en 47 minutos frente a 78. La transferencia de aprendizaje acelera de forma drástica el descenso, porque parte de un punto inicial ya cercano a una buena cuenca, pero en este conjunto de datos no desplaza el punto final de forma significativa. Este resultado refuerza la conclusión principal del trabajo: con una arquitectura entrenada desde cero, la combinación de optimización heurística de hiperparámetros y refinamiento guiado alcanza un rendimiento equivalente al de un codificador preentrenado con más del triple de parámetros.
