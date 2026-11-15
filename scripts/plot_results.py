@@ -1,10 +1,17 @@
 """Render the Phase 4 comparison figures and tables for the baseline and GA-optimized runs.
 
-Figures (in ``<output-dir>/figures``):
-    loss_curves.png        training and validation loss per epoch for both runs
-    validation_dice.png    validation Dice per epoch with best epochs and the crossing point
-    test_metrics.png       per-class, mean and whole-tumor Dice/IoU on the held-out test set
-                           (skipped until ``python -m scripts.evaluate_test_set`` has run)
+Figures (in ``<output-dir>/figures``, one file per requested format, PNG and PDF by default):
+    loss_curves        training (Classic Blue) and validation (Viva Magenta) loss per epoch,
+                       one panel per run
+    validation_dice    validation Dice per epoch, baseline in Classic Blue and the GA-optimized
+                       challenger in Viva Magenta, with best epochs and the crossing point
+    test_metrics       per-class, mean and whole-tumor Dice/IoU on the held-out test set
+                       (skipped until ``python -m scripts.evaluate_test_set`` has run)
+
+All figures use the light academic theme of ``src.utils.visualization``: Pantone Cloud Dancer
+(#F0EEE9) background, Classic Blue (#0F4C81) and Viva Magenta (#BB2649) data colors, serif type
+and 2 pt lines. Use the PDF files in the LaTeX report (vector, embedded fonts) and the 300 dpi
+PNG files in the Streamlit app.
 
 Tables (in ``<output-dir>``), the table view behind the figures:
     convergence_summary.csv     best epoch, best Dice, time to best, epoch reaching baseline best
@@ -15,7 +22,7 @@ Usage (from the project root; P4 = runs/phase4_baseline_vs_ga):
         [--optimized-history P4/02_A_ga_optimized/history.csv]
         [--test-metrics P4/03_test_comparison_baseline_vs_A/test_metrics.csv]
         [--output-dir P4/03_test_comparison_baseline_vs_A]
-        [--smoothing-window 5] [--formats png pdf] [--dpi 200]
+        [--smoothing-window 5] [--formats png pdf] [--dpi 300]
 """
 
 import argparse
@@ -27,6 +34,7 @@ from matplotlib.figure import Figure
 
 from src.utils.visualization import (
     DEFAULT_DPI,
+    DEFAULT_FORMATS,
     DEFAULT_SMOOTHING_WINDOW,
     REQUIRED_HISTORY_COLUMNS,
     TrainingRun,
@@ -61,7 +69,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--test-metrics", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--smoothing-window", type=int, default=DEFAULT_SMOOTHING_WINDOW)
-    parser.add_argument("--formats", nargs="+", default=["png"])
+    parser.add_argument("--formats", nargs="+", default=list(DEFAULT_FORMATS))
     parser.add_argument("--dpi", type=int, default=DEFAULT_DPI)
     return parser.parse_args()
 

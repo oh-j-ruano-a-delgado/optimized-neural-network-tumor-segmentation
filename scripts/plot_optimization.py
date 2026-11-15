@@ -1,15 +1,20 @@
 """Render the Phase 2 optimization figures: GA convergence and budget comparison.
 
-Figures (in ``<output-dir>/figures``):
-    ga_convergence.png            best-so-far fitness of the genetic search per evaluation
-    ga_fitness_by_generation.png  population fitness distribution and best-so-far per generation
-    budget_comparison.png         GA vs equal-budget random search (skipped until the random
-                                  search JSON produced by scripts/run_random_search.py exists)
+Figures (in ``<output-dir>/figures``, one file per requested format, PNG and PDF by default):
+    ga_convergence            best-so-far fitness of the genetic search per evaluation
+    ga_fitness_by_generation  population fitness distribution and best-so-far per generation
+    budget_comparison         GA vs equal-budget random search (skipped until the random
+                              search JSON produced by scripts/run_random_search.py exists)
+
+All figures use the light academic theme of ``src.utils.visualization``: Pantone Cloud Dancer
+(#F0EEE9) background, serif type and 2 pt lines, with the genetic algorithm in Viva Magenta
+(#BB2649) and the random-search reference in Classic Blue (#0F4C81). Use the PDF files in the
+LaTeX report and the 300 dpi PNG files in the Streamlit app.
 
 Usage (from the project root):
     python -m scripts.plot_optimization [--ga-history runs/optimization/best_hyperparameters.json]
         [--random-search runs/random_search/random_search_results.json]
-        [--output-dir runs/optimization] [--formats png pdf] [--dpi 200]
+        [--output-dir runs/optimization] [--formats png pdf] [--dpi 300]
 """
 
 import argparse
@@ -19,8 +24,6 @@ from typing import Final, List, Sequence
 from matplotlib.figure import Figure
 
 from src.optimization.reporting import (
-    GENETIC_LABEL,
-    RANDOM_LABEL,
     SearchProgress,
     build_improvement_table,
     describe_hyperparameters,
@@ -29,7 +32,7 @@ from src.optimization.reporting import (
     plot_generation_fitness,
     plot_search_progress,
 )
-from src.utils.visualization import DEFAULT_DPI, save_figure
+from src.utils.visualization import DEFAULT_DPI, DEFAULT_FORMATS, save_figure
 
 DEFAULT_GA_HISTORY: Final[Path] = Path("runs/optimization/best_hyperparameters.json")
 DEFAULT_RANDOM_SEARCH: Final[Path] = Path("runs/random_search/random_search_results.json")
@@ -42,7 +45,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--ga-history", type=Path, default=DEFAULT_GA_HISTORY)
     parser.add_argument("--random-search", type=Path, default=DEFAULT_RANDOM_SEARCH)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--formats", nargs="+", default=["png"])
+    parser.add_argument("--formats", nargs="+", default=list(DEFAULT_FORMATS))
     parser.add_argument("--dpi", type=int, default=DEFAULT_DPI)
     return parser.parse_args()
 

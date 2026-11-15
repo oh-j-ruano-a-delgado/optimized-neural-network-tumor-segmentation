@@ -5,6 +5,16 @@ counts), while the random-search reference stores one record per evaluation. Bot
 rendered as best-so-far step curves so the two searches can be compared on the same axis:
 the number of fitness evaluations, i.e. the compute budget.
 
+Figures use the shared light academic theme from ``src.utils.visualization`` (Cloud Dancer
+background, serif type, 2 pt lines, dashed translucent grid). Colors follow the same roles as
+the training figures: the random-search reference is Classic Blue (#0F4C81) and the genetic
+algorithm, the challenger whose best configuration became the GA-optimized model, is Viva
+Magenta (#BB2649). In the per-generation figure the population boxes are the primary data and
+use a translucent Classic Blue fill with a Classic Blue outline, while the best-so-far
+trajectory and the best individual of each generation are Viva Magenta. The seeded baseline
+configuration is a dashed neutral line named in the legend rather than labelled inside the
+axes, because population boxes and step curves can occupy any corner of the plot.
+
 Usage (imported by scripts/plot_optimization.py):
     from src.optimization.reporting import load_genetic_progress, load_random_progress
 """
@@ -15,29 +25,40 @@ from pathlib import Path
 from typing import Any, Dict, Final, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
-from matplotlib.axes import Axes
+from matplotlib.colors import to_rgba
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from numpy.typing import NDArray
 
 from ..utils.visualization import (
+    BASELINE_COLOR,
+    CLASSIC_BLUE,
+    LINE_WIDTH,
     OPTIMIZED_COLOR,
+    SURFACE_COLOR,
     TEXT_MUTED_COLOR,
     TEXT_PRIMARY_COLOR,
     TEXT_SECONDARY_COLOR,
+    VIVA_MAGENTA,
+    academic_theme,
     add_figure_legend,
     add_footnote,
     add_header,
-    build_glow_effects,
+    build_reference_handle,
     create_figure,
     draw_reference_level,
-    neon_theme,
 )
 
 GENETIC_LABEL: Final[str] = "Genetic algorithm"
 RANDOM_LABEL: Final[str] = "Random search"
 GA_COLOR: Final[str] = OPTIMIZED_COLOR
-RANDOM_COLOR: Final[str] = "#FFC857"
+RANDOM_COLOR: Final[str] = BASELINE_COLOR
+POPULATION_COLOR: Final[str] = CLASSIC_BLUE
+POPULATION_FILL_ALPHA: Final[float] = 0.16
+BEST_SO_FAR_COLOR: Final[str] = VIVA_MAGENTA
+IMPROVEMENT_MARKER_SIZE: Final[float] = 40.0
+SEARCH_FIGURE_SIZE: Final[Tuple[float, float]] = (10.5, 5.4)
 BASELINE_REFERENCE_LABEL: Final[str] = "Baseline configuration"
 X_AXIS_LABEL: Final[str] = "Fitness evaluations"
 Y_AXIS_LABEL: Final[str] = "Validation Dice (best so far)"
@@ -164,7 +185,7 @@ def plot_search_progress(
     subtitle: str,
     footnote: str,
 ) -> Figure:
-    with neon_theme():
+    with academic_theme():
         figure = draw_search_progress(progresses, title, subtitle, footnote)
         figure.draw_without_rendering()
     return figure
@@ -176,27 +197,26 @@ def draw_search_progress(
     subtitle: str,
     footnote: str,
 ) -> Figure:
-    figure, (axis,) = create_figure((11.0, 5.8), columns=1)
+    figure, (axis,) = create_figure(SEARCH_FIGURE_SIZE, columns=1)
     handles: List[Line2D] = []
     for progress in progresses:
         color = progress_color(progress.label)
-        line = axis.step(
+        axis.step(
             progress.evaluations,
             progress.best_so_far,
             where="post",
             color=color,
-            linewidth=3.2,
+            linewidth=LINE_WIDTH,
             label=progress.label,
-        )[0]
-        line.set_path_effects(build_glow_effects(color, 3.2))
+        )
         improvements = progress.improvements
         axis.scatter(
             progress.evaluations[improvements],
             progress.best_so_far[improvements],
-            s=46,
+            s=IMPROVEMENT_MARKER_SIZE,
             color=color,
-            edgecolor="#0B0F1A",
-            linewidth=1.4,
+            edgecolor=SURFACE_COLOR,
+            linewidth=1.2,
             zorder=5,
         )
         axis.annotate(
@@ -206,10 +226,10 @@ def draw_search_progress(
             textcoords="offset points",
             ha="right",
             color=TEXT_PRIMARY_COLOR,
-            fontsize=11,
+            fontsize=10,
             fontweight="bold",
         )
-        handles.append(Line2D([], [], color=color, linewidth=3.2, label=progress.label))
+        handles.append(Line2D([], [], color=color, linewidth=LINE_WIDTH, label=progress.label))
 
     reference = next(
         (
@@ -220,7 +240,8 @@ def draw_search_progress(
         None,
     )
     if reference is not None:
-        draw_reference_level(axis, reference, BASELINE_REFERENCE_LABEL)
+        draw_reference_level(axis, reference, None)
+        handles.append(build_reference_handle(BASELINE_REFERENCE_LABEL))
     axis.set_xlabel(X_AXIS_LABEL, color=TEXT_SECONDARY_COLOR)
     axis.set_ylabel(Y_AXIS_LABEL, color=TEXT_SECONDARY_COLOR)
     add_header(figure, title, subtitle)
@@ -230,7 +251,7 @@ def draw_search_progress(
 
 
 def plot_generation_fitness(progress: SearchProgress, title: str, footnote: str) -> Figure:
-    with neon_theme():
+    with academic_theme():
         figure = draw_generation_fitness(progress, title, footnote)
         figure.draw_without_rendering()
     return figure
@@ -240,43 +261,56 @@ def draw_generation_fitness(progress: SearchProgress, title: str, footnote: str)
     populations = [values for values in progress.populations if values]
     if not populations:
         raise ValueError("The genetic history has no per-generation populations to plot.")
-    figure, (axis,) = create_figure((11.0, 5.8), columns=1)
+    figure, (axis,) = create_figure(SEARCH_FIGURE_SIZE, columns=1)
     positions = np.arange(1, len(populations) + 1)
+    population_fill = to_rgba(POPULATION_COLOR, POPULATION_FILL_ALPHA)
     boxplot = axis.boxplot(
         populations,
         positions=positions,
         widths=0.55,
         patch_artist=True,
-        medianprops={"color": TEXT_PRIMARY_COLOR, "linewidth": 2.0},
-        whiskerprops={"color": TEXT_MUTED_COLOR},
-        capprops={"color": TEXT_MUTED_COLOR},
-        flierprops={"markeredgecolor": TEXT_MUTED_COLOR, "markerfacecolor": "none"},
+        medianprops={"color": POPULATION_COLOR, "linewidth": LINE_WIDTH},
+        whiskerprops={"color": POPULATION_COLOR, "linewidth": 1.0},
+        capprops={"color": POPULATION_COLOR, "linewidth": 1.0},
+        flierprops={
+            "marker": "o",
+            "markersize": 4.0,
+            "markeredgecolor": TEXT_MUTED_COLOR,
+            "markerfacecolor": "none",
+        },
     )
     for patch in boxplot["boxes"]:
-        patch.set_facecolor("#2A1830")
-        patch.set_edgecolor(GA_COLOR)
-        patch.set_linewidth(1.6)
+        patch.set_facecolor(population_fill)
+        patch.set_edgecolor(POPULATION_COLOR)
+        patch.set_linewidth(1.2)
     axis.step(
         positions,
         progress.best_so_far,
         where="post",
-        color=GA_COLOR,
-        linewidth=3.2,
+        color=BEST_SO_FAR_COLOR,
+        linewidth=LINE_WIDTH,
         label="Best so far",
         zorder=4,
     )
     axis.scatter(
-        positions, [max(values) for values in populations], s=42, color=GA_COLOR, zorder=5
+        positions,
+        [max(values) for values in populations],
+        s=IMPROVEMENT_MARKER_SIZE,
+        color=BEST_SO_FAR_COLOR,
+        edgecolor=SURFACE_COLOR,
+        linewidth=1.2,
+        zorder=5,
     )
     if progress.baseline_fitness is not None:
-        draw_reference_level(axis, progress.baseline_fitness, BASELINE_REFERENCE_LABEL)
+        draw_reference_level(axis, progress.baseline_fitness, None)
     axis.set_xticks(positions)
     axis.set_xlabel(GENERATION_AXIS_LABEL, color=TEXT_SECONDARY_COLOR)
     axis.set_ylabel(FITNESS_AXIS_LABEL, color=TEXT_SECONDARY_COLOR)
     axis.set_title(
         "Population fitness by generation (box = distribution, dot = best individual)",
         color=TEXT_SECONDARY_COLOR,
-        fontsize=12.5,
+        fontsize=11.5,
+        fontweight="normal",
         loc="left",
     )
     add_header(
@@ -284,6 +318,27 @@ def draw_generation_fitness(progress: SearchProgress, title: str, footnote: str)
         title,
         f"{len(populations)} generations · {int(progress.evaluations[-1])} evaluations",
     )
+    legend_handles: List[Any] = [
+        Patch(
+            facecolor=population_fill,
+            edgecolor=POPULATION_COLOR,
+            linewidth=1.2,
+            label="Population",
+        ),
+        Line2D(
+            [],
+            [],
+            color=BEST_SO_FAR_COLOR,
+            linewidth=LINE_WIDTH,
+            marker="o",
+            markersize=6.0,
+            markeredgecolor=SURFACE_COLOR,
+            label="Best so far",
+        ),
+    ]
+    if progress.baseline_fitness is not None:
+        legend_handles.append(build_reference_handle(BASELINE_REFERENCE_LABEL))
+    add_figure_legend(figure, legend_handles)
     add_footnote(figure, footnote)
     return figure
 
