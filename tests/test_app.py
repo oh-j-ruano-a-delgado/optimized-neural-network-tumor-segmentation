@@ -304,6 +304,7 @@ def test_model_card_describes_each_bundled_model() -> None:
     assert from_scratch_card.parameter_count < transfer_card.parameter_count
     assert from_scratch_card.offline_metrics is not None
     assert transfer_card.offline_metrics is not None
+    assert set(transfer_card.offline_metrics.class_dice) == set(TUMOR_CLASS_NAMES.values())
     assert transfer_card.best_epoch == transfer.checkpoint.epoch
 
 
@@ -322,28 +323,47 @@ def test_streamlit_app_renders_results_without_exceptions() -> None:
     assert len(app.get("download_button")) == 2
     assert len(app.selectbox) == 1
     assert {radio.label for radio in app.radio} == {
-        "Language",
-        "Image source",
-        "Checkpoint",
+        translate(DEFAULT_LANGUAGE, "language_label"),
+        translate(DEFAULT_LANGUAGE, "source_label"),
+        translate(DEFAULT_LANGUAGE, "model_checkpoint_label"),
     }
-    checkpoint_selector = next(radio for radio in app.radio if radio.label == "Checkpoint")
-    assert checkpoint_selector.value == DEFAULT_MODEL_KEY
+    language_selector = next(
+        radio
+        for radio in app.radio
+        if radio.label == translate(DEFAULT_LANGUAGE, "language_label")
+    )
+    assert language_selector.value == DEFAULT_LANGUAGE
+    model_selector = next(
+        radio
+        for radio in app.radio
+        if radio.label == translate(DEFAULT_LANGUAGE, "model_checkpoint_label")
+    )
+    assert model_selector.value == DEFAULT_MODEL_KEY
 
 
 def test_streamlit_app_shows_model_card_for_default_model() -> None:
     app = AppTest.from_file(str(PROJECT_ROOT / "app" / "main.py"), default_timeout=180).run()
 
-    captions = " ".join(caption.value for caption in app.caption)
+    results_prefix = translate(DEFAULT_LANGUAGE, "model_results_line").split("{")[0]
+    architecture_prefix = translate(DEFAULT_LANGUAGE, "model_card_architecture").split("{")[0]
+    caption_text = " ".join(caption.value for caption in app.caption)
+    markdown_text = " ".join(entry.value for entry in app.markdown)
 
     assert not app.exception
-    assert translate(ENGLISH, "model_card_test_dice").split("{")[0] in captions
-    assert translate(ENGLISH, "model_card_architecture").split("{")[0] in captions
+    assert results_prefix in markdown_text
+    assert translate(DEFAULT_LANGUAGE, "dice_explain") in caption_text
+    assert architecture_prefix in caption_text
+    assert translate(DEFAULT_LANGUAGE, "model_f_desc") in " ".join(
+        entry.value for entry in app.info
+    )
+    assert translate(DEFAULT_LANGUAGE, "model_selector_note") in caption_text
+    assert translate(DEFAULT_LANGUAGE, "credits") in caption_text
 
 
 def test_streamlit_app_marks_challenging_sample() -> None:
     app = AppTest.from_file(str(PROJECT_ROOT / "app" / "main.py"), default_timeout=180).run()
 
-    challenging_suffix = translate(ENGLISH, "challenging_suffix")
+    challenging_suffix = translate(DEFAULT_LANGUAGE, "challenging_suffix")
     challenging_index = next(
         index
         for index, option in enumerate(app.selectbox[0].options)
@@ -353,29 +373,38 @@ def test_streamlit_app_marks_challenging_sample() -> None:
 
     assert not app.exception
     assert any(
-        translate(ENGLISH, "challenging_hint") in warning.value for warning in app.warning
+        translate(DEFAULT_LANGUAGE, "challenging_hint") in warning.value
+        for warning in app.warning
     )
 
 
-def test_streamlit_app_switches_to_spanish() -> None:
+def test_streamlit_app_switches_to_english() -> None:
     app = AppTest.from_file(str(PROJECT_ROOT / "app" / "main.py"), default_timeout=180).run()
 
-    language_selector = next(radio for radio in app.radio if radio.label == "Language")
-    language_selector.set_value(SPANISH).run()
+    language_selector = next(
+        radio
+        for radio in app.radio
+        if radio.label == translate(SPANISH, "language_label")
+    )
+    language_selector.set_value(ENGLISH).run()
 
     assert not app.exception
-    assert app.title[0].value == translate(SPANISH, "app_title")
-    assert translate(SPANISH, "app_title") != translate(ENGLISH, "app_title")
+    assert app.title[0].value == translate(ENGLISH, "app_title")
+    assert translate(ENGLISH, "app_title") != translate(SPANISH, "app_title")
     assert {button.label for button in app.get("download_button")} == {
-        translate(SPANISH, "download_mask"),
-        translate(SPANISH, "download_overlay"),
+        translate(ENGLISH, "download_mask"),
+        translate(ENGLISH, "download_overlay"),
     }
 
 
 def test_streamlit_app_upload_mode_waits_for_a_file() -> None:
     app = AppTest.from_file(str(PROJECT_ROOT / "app" / "main.py"), default_timeout=180).run()
 
-    image_source = next(radio for radio in app.radio if radio.label == "Image source")
+    image_source = next(
+        radio
+        for radio in app.radio
+        if radio.label == translate(DEFAULT_LANGUAGE, "source_label")
+    )
     image_source.set_value("upload").run()
 
     assert not app.exception
@@ -391,8 +420,8 @@ def test_translations_are_complete_for_every_language() -> None:
     assert all(TRANSLATIONS[SPANISH][key] for key in english_keys)
 
 
-def test_translate_falls_back_to_english() -> None:
-    assert translate("fr", "app_title") == translate(ENGLISH, "app_title")
+def test_translate_falls_back_to_default_language() -> None:
+    assert translate("fr", "app_title") == translate(DEFAULT_LANGUAGE, "app_title")
     assert translate(ENGLISH, "missing_key") == "missing_key"
 
 

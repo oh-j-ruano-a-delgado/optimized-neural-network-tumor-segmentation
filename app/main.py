@@ -141,7 +141,9 @@ def render_image_source(t: Translator) -> Tuple[NDArray[np.uint8], Optional[str]
     return decode_image_bytes(uploaded_file.getvalue()), None
 
 
-def render_advanced_settings(t: Translator, availability: Mapping[str, bool]) -> Tuple:
+def render_model_selection(
+    t: Translator, availability: Mapping[str, bool]
+) -> Tuple[str, SegmentationModel]:
     available_keys = [key for key, present in availability.items() if present]
     default_key = (
         DEFAULT_MODEL_KEY
@@ -149,18 +151,38 @@ def render_advanced_settings(t: Translator, availability: Mapping[str, bool]) ->
         else available_keys[0]
     )
 
-    with st.sidebar:
-        st.subheader(t("advanced_title"))
-        model_key = st.radio(
-            t("model_checkpoint_label"),
-            available_keys,
-            index=available_keys.index(default_key),
-            format_func=lambda key: t(f"model_{key}"),
-            horizontal=True,
+    st.subheader(t("model_step_title"))
+    model_key = st.radio(
+        t("model_checkpoint_label"),
+        available_keys,
+        index=available_keys.index(default_key),
+        format_func=lambda key: t(f"model_{key}"),
+        horizontal=True,
+    )
+    if not all(availability.values()):
+        st.caption(t("model_missing"))
+    st.caption(t("model_selector_note"))
+
+    model = get_model(model_key)
+    st.info(t(f"model_{model_key}_desc"))
+    card = build_model_card(model)
+    if card.offline_metrics is not None:
+        class_scores = " · ".join(
+            f"{t(f'class_{class_name}')} {dice:.2f}"
+            for class_name, dice in card.offline_metrics.class_dice.items()
         )
-        st.caption(t(f"model_{model_key}_desc"))
-        if not all(availability.values()):
-            st.caption(t("model_missing"))
+        st.markdown(
+            t("model_results_line").format(
+                mean=f"{card.offline_metrics.test_mean_dice:.3f}",
+                classes=class_scores,
+            )
+        )
+        st.caption(t("dice_explain"))
+    return model_key, model
+
+
+def render_advanced_settings(t: Translator, model_key: str) -> Tuple[float, float]:
+    with st.expander(t("advanced_title")):
         overlay_alpha = st.slider(
             t("overlay_opacity"),
             *OVERLAY_ALPHA_RANGE,
@@ -175,9 +197,8 @@ def render_advanced_settings(t: Translator, availability: Mapping[str, bool]) ->
             SLIDER_STEP,
             help=t("confidence_threshold_help"),
         )
-        model = get_model(model_key)
-        render_model_card(t, model)
-    return model_key, overlay_alpha, confidence_threshold
+        render_model_card(t, get_model(model_key))
+    return overlay_alpha, confidence_threshold
 
 
 def render_model_card(t: Translator, model: SegmentationModel) -> None:
@@ -197,15 +218,14 @@ def render_model_card(t: Translator, model: SegmentationModel) -> None:
     )
     if card.offline_metrics is not None:
         st.caption(
-            t("model_card_test_dice").format(
-                mean=f"{card.offline_metrics.test_mean_dice:.4f}",
-                whole=f"{card.offline_metrics.test_whole_tumor_dice:.4f}",
-            )
-        )
-        st.caption(
             t("model_card_training").format(
                 epochs=card.offline_metrics.training_epochs,
                 minutes=card.offline_metrics.training_minutes,
+            )
+        )
+        st.caption(
+            t("model_card_whole_tumor").format(
+                dice=f"{card.offline_metrics.test_whole_tumor_dice:.3f}"
             )
         )
 
@@ -329,9 +349,9 @@ def main() -> None:
         st.stop()
 
     image, ground_truth_class = render_image_source(t)
-    model_key, overlay_alpha, confidence_threshold = render_advanced_settings(t, availability)
+    model_key, model = render_model_selection(t, availability)
+    overlay_alpha, confidence_threshold = render_advanced_settings(t, model_key)
 
-    model = get_model(model_key)
     with st.spinner(t("running_inference")):
         preprocessed = preprocess_image(image, model)
         started_at = time.perf_counter()
@@ -354,6 +374,7 @@ def main() -> None:
     with st.expander(t("about_title")):
         st.markdown(t("about_body"))
     st.caption(t("disclaimer"))
+    st.caption(t("credits"))
 
 
 if __name__ == "__main__":
