@@ -4,7 +4,7 @@ La \cref{tab:todas} recoge la configuración y el resultado de todas las ejecuci
 
 \begin{table}[htbp]
   \centering
-  \caption{Configuración y resultados de todas las ejecuciones. DF: Dice-Focal ($w_r=w_p=0.5$, $\gamma=2$). FT: Focal Tversky-Focal ($w_r=w_p=0.5$, $\gamma_T=4/3$) con los pesos $\alpha/\beta$ indicados. PT: parada temprana con paciencia de 20 épocas. Los aumentos se definen en la \cref{subsec:aumento}.}
+  \caption{Configuración y resultados de todas las ejecuciones. DF: Dice-Focal ($w_r=w_p=0.5$, $\gamma=2$). FT: Focal Tversky-Focal ($w_r=w_p=0.5$, $\gamma_T=4/3$) con los pesos $\alpha/\beta$ indicados. PT: parada temprana con paciencia de 20 épocas. Los aumentos se definen en el \cref{subsec:aumento}.}
   \label{tab:todas}
   \small
   \setlength{\tabcolsep}{3.4pt}
@@ -34,30 +34,26 @@ La \cref{tab:todas} recoge la configuración y el resultado de todas las ejecuci
 
 El código fuente del proyecto está organizado en módulos de datos (\texttt{src/dataset}), modelos y pérdidas (\texttt{src/models}), optimización (\texttt{src/optimization}) y utilidades de entrenamiento y evaluación (\texttt{src/utils}), con guiones ejecutables en \texttt{scripts/} y la interfaz en \texttt{app/}. El algoritmo genético se implementa en \texttt{src/optimization/genetic.py} y su función de aptitud en \texttt{src/optimization/fitness.py}. Las órdenes siguientes reproducen las ejecuciones principales desde la raíz del repositorio:
 
-\begin{small}
+\begin{footnotesize}
 \begin{verbatim}
 python -m scripts.run_optimization --epochs 3 --device auto --amp
-
 python -m scripts.train_baseline --epochs 100 --learning-rate 0.000315144 \
     --weight-decay 1.90823e-06 --base-filters 16 --depth 4 --batch-size 8 \
     --seed 42 --device auto --amp
-
 python -m scripts.train_baseline --epochs 150 --learning-rate 0.000315144 \
     --weight-decay 1.90823e-06 --base-filters 32 --depth 4 --batch-size 8 \
     --seed 42 --augmentation advanced_spatial --loss focal_tversky_focal \
     --tversky-alpha 0.6 --tversky-beta 0.4 --lr-schedule cosine \
     --device auto --amp
-
 python -m scripts.train_baseline --model smp_unet --encoder resnet34 \
     --encoder-weights imagenet --encoder-lr-multiplier 0.1 --epochs 100 \
     --learning-rate 0.000315144 --weight-decay 1.90823e-06 --batch-size 8 \
     --seed 42 --augmentation advanced_spatial --loss focal_tversky_focal \
     --tversky-alpha 0.6 --tversky-beta 0.4 --lr-schedule cosine \
     --device auto --amp
-
 python -m scripts.evaluate_test_set
 streamlit run app/main.py
 \end{verbatim}
-\end{small}
+\end{footnotesize}
 
-Las órdenes corresponden, por este orden, a la búsqueda del algoritmo genético, al reentrenamiento de la configuración del AG (ejecución A), al modelo refinado (E), al modelo con transferencia de aprendizaje (F), a la evaluación en el conjunto de prueba y a la interfaz de inferencia. Los datos de todas las figuras de esta memoria se encuentran en la carpeta \texttt{data/} del propio documento.
+Las órdenes reproducen, en este orden, la búsqueda del AG, las ejecuciones A, E y F, la evaluación en prueba y la interfaz de inferencia. Los datos de las figuras de PGFPlots están en \texttt{data/}, y las de \texttt{figures/} se regeneran con \texttt{python -m scripts.generate\_report\_figures}.

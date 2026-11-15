@@ -1,6 +1,6 @@
 \section{Complemento: transferencia de aprendizaje}\label{sec:transferencia}
 
-Como experimento adicional, ajeno al núcleo de optimización del trabajo, se evaluó si un extractor de características externo puede superar los límites intrínsecos de un conjunto de datos pequeño. La ejecución F sustituye el codificador entrenado desde cero por una ResNet34~\cite{he2016resnet} preentrenada en ImageNet~\cite{deng2009imagenet}, integrada en una U-Net de la biblioteca Segmentation Models PyTorch~\cite{iakubovskii2019smp} con un único canal de entrada y cuatro clases de salida (24.43 millones de parámetros). El resto de la configuración se hereda de E: aumento espacial avanzado, pérdida Focal Tversky-Focal con $\alpha=0.6$ y $\beta=0.4$, recocido coseno (100 épocas) y la tasa de aprendizaje y el decaimiento del AG. La única adaptación es una tasa de aprendizaje diferenciada: el decodificador usa la tasa del AG ($3.15\cdot10^{-4}$) y el codificador preentrenado una diez veces menor, para que los gradientes grandes y ruidosos del decodificador recién inicializado no destruyan las características de ImageNet en las primeras épocas.
+Como experimento adicional, ajeno al núcleo de optimización del trabajo, se evaluó si un extractor de características externo supera los límites de un conjunto de datos pequeño. La ejecución F sustituye el codificador entrenado desde cero por una ResNet34~\cite{he2016resnet} preentrenada en ImageNet, integrada en una U-Net de Segmentation Models PyTorch con un canal de entrada y cuatro clases (24.43 millones de parámetros). El resto de la configuración se hereda de E (aumento espacial avanzado, pérdida Focal Tversky-Focal con $\alpha=0.6$ y $\beta=0.4$, \textit{cosine annealing} sobre 100 épocas y los valores de $\eta$ y $\lambda$ del AG), salvo que el codificador preentrenado usa una tasa de aprendizaje diez veces menor, para que los gradientes ruidosos del decodificador recién inicializado no destruyan sus características.
 
 \begin{table}[htbp]
   \centering
@@ -24,12 +24,22 @@ Como experimento adicional, ajeno al núcleo de optimización del trabajo, se ev
   \end{tabular}
 \end{table}
 
-La \cref{tab:transferencia} resume los resultados, que admiten tres lecturas:
+\clearpage
+
+La \cref{tab:transferencia} admite tres lecturas:
 
 \begin{itemize}
-  \item \textbf{En Dice medio, E y F están estadísticamente empatados.} F obtiene 0.8250 en prueba (intervalo de confianza al 95\,\% de $[0.785,\,0.852]$), pero su ventaja sobre E, $+0.007$, tiene un intervalo que incluye el cero. La gran ventaja en validación ($+0.061$) no se traslada a prueba, lo que confirma de nuevo que el conjunto de validación es un instrumento optimista.
-  \item \textbf{Las características externas resuelven el reconocimiento del tipo de tumor.} La confusión de tumor hipofisario con meningioma en validación cae del 18.4\,\% al 4.2\,\%, y en prueba ninguna confusión entre tipos supera el 1\,\% de los píxeles. La mejora en meningioma es significativa. Es el beneficio más claro de ImageNet: un contexto global más rico para distinguir lesiones de apariencia parecida.
-  \item \textbf{No mejoran la delimitación del glioma.} F es más conservador: su precisión en el glioma sube (0.894 en prueba) pero su sensibilidad cae (0.556), con una razón FN/FP de 6.7, y empeora en 12 de los 18 pacientes con glioma. Los bordes infiltrativos siguen siendo el límite, posiblemente porque un único corte T1-CE ofrece una señal débil para delimitarlos.
+  \item \textbf{En Dice medio, E y F están estadísticamente empatados.} F obtiene 0.8250 en prueba, pero el intervalo de confianza de su ventaja sobre E, $+0.007$, incluye el cero. La gran ventaja en validación ($+0.061$) no se traslada a prueba, lo que confirma que el conjunto de validación es un instrumento optimista.
+  \item \textbf{Las características externas resuelven el reconocimiento del tipo de tumor.} La confusión de tumor hipofisario con meningioma en validación cae del 18.4\,\% al 4.2\,\%, y en prueba ninguna confusión entre tipos supera el 1\,\% de los píxeles (\cref{fig:confusion}). La mejora en meningioma es significativa.
+  \item \textbf{No mejoran la delimitación del glioma.} F es más conservador: su precisión en el glioma sube (0.894 en prueba), pero su sensibilidad cae (0.556), y empeora en 12 de los 18 pacientes con glioma. F clasifica como fondo el 43.6\,\% de los píxeles de glioma, frente al 34.5\,\% de E: los bordes difusos siguen siendo el límite, posiblemente porque un único corte ofrece una señal débil para delimitarlos.
 \end{itemize}
 
-La ventaja inequívoca es la eficiencia: F alcanza un Dice de validación de 0.75 en la época 7, frente a la 49 de E, y termina su entrenamiento en 47 minutos frente a 78. La transferencia de aprendizaje acelera de forma drástica el descenso, porque parte de un punto inicial ya cercano a una buena cuenca, pero en este conjunto de datos no desplaza el punto final de forma significativa. Este resultado refuerza la conclusión principal del trabajo: con una arquitectura entrenada desde cero, la combinación de optimización heurística de hiperparámetros y refinamiento guiado alcanza un rendimiento equivalente al de un codificador preentrenado con más del triple de parámetros.
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.485\linewidth]{conf_matrix_E.pdf}\hfill
+  \includegraphics[width=0.485\linewidth]{conf_matrix_F.pdf}
+  \caption{Matrices de confusión a nivel de píxel en el conjunto de prueba (592 cortes), normalizadas por filas: cada celda indica el porcentaje de los píxeles de la clase real que recibe cada predicción. El recuadro destaca el error dominante de ambos modelos: los píxeles de glioma omitidos como fondo.}
+  \label{fig:confusion}
+\end{figure}
+
+La ventaja inequívoca es la eficiencia (Dice de validación de 0.75 en la época 7 frente a la 49, y 47 minutos de entrenamiento frente a 78): la transferencia parte de un punto inicial cercano a una buena cuenca, pero no desplaza el punto final de forma significativa. La red entrenada desde cero con hiperparámetros optimizados y refinamiento guiado rinde igual que un codificador preentrenado con más del triple de parámetros.

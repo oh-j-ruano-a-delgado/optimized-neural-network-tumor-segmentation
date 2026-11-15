@@ -10,6 +10,7 @@
 \usepackage{amsmath,amssymb,mathtools,bm}
 \usepackage{booktabs,tabularx,multirow,array}
 \usepackage{graphicx}
+\graphicspath{{figures/}}
 \usepackage[table]{xcolor}
 \usepackage{tikz}
 \usetikzlibrary{positioning,arrows.meta,calc,fit,backgrounds,shapes.geometric,shapes.misc,decorations.pathreplacing,babel}
@@ -23,8 +24,13 @@
 \usepackage{csquotes}
 \usepackage[backend=biber,style=numeric-comp,sorting=none,maxbibnames=6,giveninits=true,url=false,doi=true]{biblatex}
 \addbibresource{referencias.bib}
-\usepackage[colorlinks=true,linkcolor=azulenlace,citecolor=azulenlace,urlcolor=azulenlace]{hyperref}
+\renewcommand*{\bibfont}{\small}
+\setcounter{biburlnumpenalty}{9000}
+\setcounter{biburllcpenalty}{7000}
+\setcounter{biburlucpenalty}{8000}
+\usepackage[colorlinks=true,linkcolor=black,citecolor=azulenlace,urlcolor=azulenlace]{hyperref}
 \usepackage[spanish,noabbrev]{cleveref}
+\usepackage[spanish]{babel}
 
 \definecolor{azulenlace}{HTML}{1F4E79}
 \definecolor{cazul}{HTML}{0072B2}
@@ -115,10 +121,16 @@
 \newcommand{\asignatura}{Optimización y Heurística}
 \newcommand{\cursoacademico}{Curso 2026--2027}
 \newcommand{\tituloinforme}{Optimización en dos niveles para la segmentación automática de tumores cerebrales en resonancia magnética}
-\newcommand{\subtituloinforme}{Descenso de gradiente en una red U-Net y metaoptimización de hiperparámetros mediante un algoritmo genético}
-\newcommand{\fechainforme}{Noviembre de 2026}
+\newcommand{\subtituloinforme}{Descenso por gradiente en una red U-Net y metaoptimización de hiperparámetros mediante un algoritmo genético}
+\newcommand{\fechainforme}{\today}
 
-\hypersetup{pdftitle={\tituloinforme},pdfauthor={Javier Ruano Hernández, Alejandro Delgado Valera},pdfsubject={\asignatura}}
+\hypersetup{
+  pdftitle={\tituloinforme},
+  pdfauthor={Javier Ruano Hernández, Alejandro Delgado Valera},
+  pdfsubject={\asignatura},
+  colorlinks=true,
+  allcolors=black
+}
 
 \pagestyle{fancy}
 \fancyhf{}
@@ -129,6 +141,7 @@
 
 \begin{document}
 
+\hypersetup{pageanchor=false}
 \begin{titlepage}
   \centering
   \vspace*{1.2cm}
@@ -144,16 +157,18 @@
   {\large\itshape \subtituloinforme\par}
   \vspace{0.4cm}
   \rule{\linewidth}{0.8pt}\par
-  \vspace{2.2cm}
-  {\large Memoria final del proyecto\par}
+  \vspace{1.8cm}
+  {\normalsize\bfseries Repositorio del proyecto en GitHub:\par}
+  \vspace{0.2cm}
+  {\small\href{https://github.com/oh-j-ruano-a-delgado/optimized-neural-network-tumor-segmentation}{\texttt{github.com/oh-j-ruano-a-delgado/optimized-neural-network-tumor-segmentation}}\par}
   \vspace{1.6cm}
   \begin{tabular}{c}
-    \large Javier Ruano Hernández\\[4pt]
-    \large Alejandro Delgado Valera
+    \large Javier Ruano Hernández - Alejandro Delgado Valera\\[4pt]
   \end{tabular}\par
   \vfill
   {\large \fechainforme\par}
 \end{titlepage}
+\hypersetup{pageanchor=true}
 
 \input{sections/00_resumen}
 
@@ -168,11 +183,11 @@
 \input{sections/05_refinamiento}
 \input{sections/06_transferencia}
 \input{sections/07_discusion_conclusiones}
-
 \clearpage
 \printbibliography[heading=bibintoc,title={Referencias}]
 
 \appendix
 \input{sections/08_apendice}
+\input{sections/appendix_ai}
 
 \end{document}
