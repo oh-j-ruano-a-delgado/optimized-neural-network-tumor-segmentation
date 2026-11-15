@@ -1,243 +1,102 @@
-# optimized-neural-network-tumor-segmentation
+# Optimización en dos niveles para la segmentación automática de tumores cerebrales en resonancia magnética
 
-Automatic brain tumor segmentation on MRI scans using a modular U-Net with a
-Dice-Focal loss, tuned with metaheuristic optimization (Genetic Algorithms / PSO).
+### Descenso de gradiente en una red U-Net y metaoptimización de hiperparámetros mediante un algoritmo genético
 
-## Requirements
+**Javier Ruano Hernández · Alejandro Delgado Valera**
+Universidad de Las Palmas de Gran Canaria · Asignatura *Optimización y Heurística* · Curso 2026–2027
 
-- Python 3.11
+**Idioma:** **Español** · [English](README.en.md)
 
-## Installation
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](docs/development.md)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)](docs/development.md)
+[![Streamlit](https://img.shields.io/badge/Demo-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](#demo)
 
-### CPU
+![Imagen de entrada, predicción del modelo F y anotación del experto](docs/hero_overlay.png)
 
-```bash
-pip install -r requirements.txt
-```
+*Izquierda: imagen de entrada · Centro: predicción del modelo F · Derecha: la anotación del experto (este caso de glioma: Dice 0.87).*
 
-### NVIDIA GPU (CUDA)
+## Sobre el proyecto
 
-The default wheels of `torch`/`torchvision` already include CUDA support, so the
-command above also works on GPU machines. Verify it:
+Este proyecto **segmenta automáticamente tumores cerebrales** en imágenes de resonancia magnética. A partir de un conjunto público de 3.064 cortes de RM con contraste, entrenamos redes U-Net que clasifican cada píxel de la imagen como fondo o como uno de los tres tipos de tumor más frecuentes —**meningioma, glioma e hipófisis**—, optimizamos sus hiperparámetros con un **algoritmo genético** escrito a mano y mejoramos el resultado final con **transfer learning**.
 
-```bash
-python -c "import torch; print(torch.cuda.is_available())"   # must print True
-```
+El mejor modelo alcanza un **Dice medio de 0.825** en el conjunto de prueba (0.134 por encima del modelo base, entrenado con ajustes manuales) y es el motor de la demo interactiva de este repositorio.
 
-If it prints `False`, reinstall PyTorch with the wheel that matches your driver
-(pick your CUDA version at https://pytorch.org/get-started/locally/):
+## Demo
 
-```bash
-pip install torch==2.14.0 torchvision==0.29.0 --index-url https://download.pytorch.org/whl/cu126
-```
+> **Demo en vivo:** *próximamente — se publicará en Streamlit Community Cloud.*
 
-## Dataset
+Para probarla en local:
 
 ```bash
-python -m src.dataset.download_data   # downloads Figshare from Kaggle and converts it to PNG
-python -m scripts.visualize_sample    # optional: visual sanity check
-```
-
-Alternatively, copy a prepared `data/raw/Training` and `data/raw/Testing` from
-another machine (the patient-wise split is seed-based, so it stays identical).
-
-## Training
-
-```bash
-python -m scripts.train_baseline --epochs 40 --device auto           # CPU or GPU
-python -m scripts.train_baseline --epochs 40 --device auto --amp     # GPU with mixed precision
-python -m scripts.train_baseline --epochs 2 --limit-batches 20       # quick smoke test
-```
-
-Artifacts are written to `runs/baseline/` (`history.csv` and `best_model.pth`).
-
-Phase 5 options (defaults reproduce the Phase 2-4 setup):
-
-```bash
-python -m scripts.train_baseline --augmentation advanced --loss focal_tversky_focal   # Focal Tversky (alpha 0.7, beta 0.3, gamma 4/3) + Focal
-python -m scripts.train_baseline --loss dice_ce                                        # Dice + cross-entropy control
-python -m scripts.train_baseline --augmentation advanced_spatial --loss focal_tversky_focal --epochs 200 --early-stopping-patience 20
-python -m scripts.evaluate_diagnostics --checkpoint runs/baseline_vs_ga/02_A_ga_optimized/best_model.pth     # per-class precision/recall and confusion matrices on the validation split
-```
-
-Augmentation presets form a 2 x 2 design: `basic` (basic spatial), `advanced_spatial` (advanced
-spatial only), `advanced_intensity` (basic spatial + intensity) and `advanced` (both). With
-`--early-stopping-patience N`, training stops after N epochs without a new best validation Dice.
-With `--lr-schedule cosine`, the learning rate anneals to zero over `--epochs` epochs.
-
-Phase 7 options (transfer learning with `segmentation_models_pytorch`):
-
-```bash
-python -m scripts.train_baseline --model smp_unet --encoder resnet34 --encoder-lr-multiplier 0.1   # ImageNet-pretrained ResNet34 encoder, encoder at 1/10 of --learning-rate
-python -m scripts.train_baseline --model smp_unet --encoder resnet34 --encoder-weights none        # same network from random initialization (pretraining control)
-```
-
-`--model unet` (default) keeps the custom U-Net. The ImageNet weights are downloaded from the
-Hugging Face Hub the first time an SMP model is built for training, so that step needs internet
-access; evaluating a saved checkpoint does not.
-
-Local experiment archive (`runs/` is gitignored): runs are grouped by phase and numbered in
-chronological order, e.g. `runs/baseline_vs_ga/02_A_ga_optimized/` or
-`runs/capacity_and_lr_schedule/10_E_ultimate_unet/`. The evaluation and plotting scripts
-default to the Phase 4 folders of this layout.
-
-## Optimization analysis
-
-```bash
-python -m scripts.run_optimization --epochs 3     # GA -> runs/optimization/best_hyperparameters.json
-python -m scripts.plot_optimization               # convergence and budget-comparison figures
-```
-
-`scripts.plot_optimization` writes `ga_convergence.png` and `ga_fitness_by_generation.png`
-to `runs/optimization/figures/`, plus `budget_comparison.png` once an equal-budget
-random-search JSON exists under `runs/random_search/`. `scripts.run_optimization` prints
-the exact retraining command for the winning genome; retrain it with
-`scripts.train_baseline`.
-
-## Evaluation
-
-```bash
-python -m scripts.evaluate_test_set   # pixel-pooled Dice/IoU + per-slice detection metrics
-python -m scripts.plot_results        # figures and tables -> runs/comparison/
-```
-
-Besides `test_metrics.csv/json`, the evaluation writes `test_slices.csv` (one row per
-slice) and `test_slice_metrics.json` (detection rate, missed tumors and per-slice Dice
-percentiles per model), so small-lesion behaviour is visible next to the pooled scores.
-
-## Interface (Streamlit)
-
-An interactive, bilingual (English/Spanish) demo that guides visitors through three
-steps: choose a slice, look at the four views (preprocessed input, per-class overlay,
-predicted mask and per-pixel confidence map) and read a plain-language interpretation
-with the detected tumor type, its share of the slice and how confident the model is.
-Nine slices from the held-out Testing split ship with the repository under
-`app/samples/`, so the app can be tried without uploading anything, while any PNG in
-the same domain can also be uploaded. One glioma slice is labelled as a *challenging
-case* where the transfer-learning model returns an empty mask. The model selector,
-settings and model card live in the sidebar.
-
-```bash
+git clone https://github.com/oh-j-ruano-a-delgado/optimized-neural-network-tumor-segmentation.git
+cd optimized-neural-network-tumor-segmentation
 pip install -r requirements.txt
 streamlit run app/main.py
 ```
 
-The app ships two checkpoints: `app/models/e_unet.pth` (model E, custom U-Net trained
-from scratch) and `app/models/f_smp_unet_fp16.pth` (model F, U-Net with a ResNet34
-encoder pre-trained on ImageNet, stored in half precision and cast to float32 at load
-time). Both appear in the sidebar checkpoint selector, which defaults to F. To refresh
-a checkpoint, copy a trained `runs/.../best_model.pth` over it:
+La demo es **bilingüe (español/inglés)** y no requiere conocimientos médicos: elige una imagen de ejemplo o sube la tuya, compara los dos modelos, mira dónde el tumor fue detectado (superposición por color, máscara y mapa de confianza por píxel) y lee la interpretación en lenguaje llano con el tipo de tumor encontrado y su tamaño relativo.
 
-```bash
-cp runs/capacity_and_lr_schedule/10_E_ultimate_unet/best_model.pth app/models/e_unet.pth
-python -m scripts.export_checkpoint_fp16 --checkpoint runs/transfer_learning/13_F_smp_unet_resnet34/best_model.pth --output app/models/f_smp_unet_fp16.pth
+## Resultados
+
+| Modelo | Qué es | Mejor Dice (val.) | Dice medio (test) | Tumor completo (test) |
+|---|---|---:|---:|---:|
+| Baseline | Ajustes manuales (U-Net, 16 filtros) | 0.654 | 0.691 | 0.623 |
+| **A** | Ganador del algoritmo genético, reentrenado | 0.770 | 0.776 | 0.723 |
+| **E** | U-Net más ancho (32 filtros) + Focal Tversky + LR cosenoidal | 0.761 | 0.818 | 0.776 |
+| **F** | Transfer learning desde una ResNet34 preentrenada | 0.822 | **0.825** | 0.765 |
+
+El *Dice* mide la superposición entre la predicción y la anotación del experto (1.00 = perfecto). Las cifras de test promedian meningioma, glioma e hipófisis sobre **592 cortes de prueba** de **46 pacientes** que nunca se usaron para entrenar ni seleccionar modelos. Además, el modelo base detecta tumor en el 90.7 % de esos cortes y el modelo A en el 93.4 %, ambos sin falsos positivos.
+
+El modelo F es significativamente mejor que E en meningioma (+0.029) pero algo peor en gliomas (−0.028): la tabla completa del análisis está en el informe.
+
+## ¿Por qué solo dos modelos en la demo?
+
+La demo incluye **E** y **F**, los dos modelos finales de la investigación:
+
+- **E** es el mejor modelo entrenado desde cero y **F** el mejor de todos; representan justamente las dos conclusiones del proyecto: ¿merece la pena ensanchar y reentrenar la red desde cero, o partir de un modelo ya entrenado?
+- *Baseline* y *A* fueron pasos intermedios de la misma pipeline. Son estrictamente peores que E y F, así que solo añadirían peso descargado (~74 MB de checkpoints ya incluidos) y más tiempo de carga sin aportar nada nuevo a quien visita la demo.
+- Ambos modelos hacen exactamente lo mismo (las mismas cuatro clases sobre cortes de 256×256), así que la comparación es directa y justa.
+
+¿Quieres añadir otro modelo? Basta exportar su checkpoint con `scripts/export_checkpoint_fp16.py` y registrarlo en `app/segmentation.py`.
+
+## Cómo funciona
+
+1. **Datos** — 3.064 cortes de RM de 233 pacientes (Figshare), divididos *por paciente* para que ningún paciente aparezca a la vez en entrenamiento y prueba.
+2. **Modelo** — una red U-Net (codificador–descodificador) clasifica cada píxel en fondo, meningioma, glioma o hipófisis.
+3. **Pérdida** — Dice-Focal, y Focal-Tversky en los últimos modelos, para compensar que el tumor ocupa una fracción mínima de cada imagen (clase mayoritaria vs. minoritaria).
+4. **Optimización** — un algoritmo genético propio ajusta la tasa de aprendizaje, la penalización L2 y el ancho/profundidad de la red, y se compara contra una búsqueda aleatoria con el mismo presupuesto de evaluaciones.
+5. **Transfer learning** — el modelo final parte de un codificador ResNet34 preentrenado con ImageNet y se adapta a resonancias magnéticas, con una tasa de aprendizaje reducida para el codificador.
+
+## Datos
+
+Jun Cheng, *brain tumor dataset*, figshare (2015), <https://doi.org/10.6084/m9.figshare.1512427>
+— 3.064 cortes T1 con contraste de 233 pacientes (708 meningioma, 1.426 glioma, 930 hipófisis), licencia [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Los artículos asociados son Cheng et al., *PLoS ONE* 10(10) (2015) y 11(6) (2016). El dataset se descarga a través del espejo de Kaggle `ashkhagan/figshare-brain-tumor-dataset` y **no se redistribuye** en este repositorio.
+
+## Estructura del repositorio
+
+```
+app/        demo en Streamlit (español/inglés) con los modelos E y F
+src/        datos, redes U-Net, funciones de pérdida y algoritmo genético
+scripts/    entrenamiento, optimización, evaluación y gráficas
+tests/      suite de pruebas (pytest)
+docs/       guía técnica, figuras del README
 ```
 
-### Deploy on Streamlit Community Cloud
+## Más información
 
-1. Push the repository to GitHub and make it public (or grant Streamlit access to it).
-2. Sign in at <https://share.streamlit.io> with GitHub and click **New app**.
-3. Select the repository and the branch that contains the interface (or `develop` once
-   it is merged), set the main file to `app/main.py` and deploy. Streamlit installs
-   `requirements.txt` automatically; no secrets are required.
+- **[docs/development.md](docs/development.md)** — guía técnica completa: instalación, reproducción de todos los resultados, opciones de entrenamiento, despliegue en Streamlit Cloud y ejecución en Kaggle/Colab.
+- El **informe completo (memoria)** acompaña esta entrega como documento aparte; el enunciado de la práctica está en [`bases-proyecto-optimizacionyheuristica.md`](bases-proyecto-optimizacionyheuristica.md).
 
-## Cloud training (Kaggle / Colab)
+## Autores
 
-Both platforms ship PyTorch with CUDA preinstalled, so install only the remaining
-dependencies (this avoids re-downloading several GB of torch wheels):
+**Javier Ruano Hernández** y **Alejandro Delgado Valera**
+Universidad de Las Palmas de Gran Canaria · Asignatura *Optimización y Heurística* · Curso 2026–2027 · Noviembre de 2026
 
-```bash
-!pip install -q numpy opencv-python h5py kaggle scikit-learn scipy matplotlib pandas pytest albumentations==2.0.8 segmentation-models-pytorch==0.6.0
-```
+## Licencia
 
-If the repository is private, clone it with a token or make it public (see the
-"Access to a private repository" note below).
+El código de este repositorio se publica bajo la [licencia MIT](LICENSE). El dataset está bajo [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) de sus autores originales y **no** se redistribuye aquí.
 
-### Kaggle Notebooks (recommended for long runs)
+## Aviso médico
 
-1. New notebook → Settings → **Accelerator** `T4 x2` (or `P100`) and **Internet** on.
-2. Clone the code **inside `/kaggle/working`** (the only directory that survives the
-   session, so every artifact is kept in the Output tab). `main` only contains the README,
-   so pass the branch that holds the code with `--branch` (no need to change the
-   repository default branch):
-
-```bash
-%%bash
-set -e
-cd /kaggle/working
-git clone --branch develop --single-branch \
-  https://github.com/oh-j-ruano-a-delgado/optimized-neural-network-tumor-segmentation.git
-cd optimized-neural-network-tumor-segmentation
-pip install -q numpy opencv-python h5py kaggle scikit-learn scipy matplotlib pandas pytest albumentations==2.0.8 segmentation-models-pytorch==0.6.0
-python -m src.dataset.download_data
-python -m scripts.train_baseline --epochs 40 --device auto --amp
-```
-
-3. Hyperparameter search (genetic algorithm and its equal-budget random-search
-   reference). Both write their history JSON under `runs/`, so download them from the
-   notebook Output before the session ends:
-
-```bash
-%%bash
-set -e
-cd /kaggle/working/optimized-neural-network-tumor-segmentation
-python -m scripts.run_optimization --epochs 3 --device auto --amp
-python -m scripts.run_random_search --evaluations 46 --epochs 3 --device auto --amp
-```
-
-The default GA configuration (10 individuals, 5 generations, one elite) costs 46 fitness
-evaluations, so the random-search reference uses the same 46. `run_optimization` prints
-the command that retrains the winning configuration for the final model; it adds about
-one hour. To run without keeping the tab open, use **Save & Run All (Commit)**
-(12-hour limit per session, ~30 GPU-hours per week).
-
-### Google Colab (interactive debugging)
-
-Same `git clone` and `pip install` cells, but the Kaggle API needs your token:
-
-```python
-from google.colab import files
-files.upload()   # upload kaggle.json
-!mkdir -p ~/.kaggle && mv kaggle.json ~/.kaggle/ && chmod 600 ~/.kaggle/kaggle.json
-!python -m src.dataset.download_data
-```
-
-Colab's disk is ephemeral, so save the artifacts to Google Drive when done:
-
-```python
-!python -m scripts.train_baseline --epochs 40 --device auto --amp
-from google.colab import drive
-drive.mount('/content/drive')
-!cp -r runs/baseline /content/drive/MyDrive/
-```
-
-### Access to a private repository
-
-`git clone` needs credentials when the repository is private. On Kaggle, store a
-GitHub token as a notebook secret (Add-ons → Secrets) and use it:
-
-```python
-from kaggle_secrets import UserSecretsClient
-token = UserSecretsClient().get_secret("GITHUB_TOKEN")
-!git clone https://{token}@github.com/oh-j-ruano-a-delgado/optimized-neural-network-tumor-segmentation.git
-```
-
-## Hyperparameter optimization and comparison
-
-```bash
-python -m scripts.run_optimization --epochs 3                             # GA -> runs/optimization/best_hyperparameters.json
-python -m scripts.run_random_search --evaluations 46                      # equal-budget reference -> runs/random_search/
-python -m scripts.evaluate_test_set                                       # baseline vs optimized on the Testing split
-python -m scripts.plot_results                                            # figures and tables -> runs/comparison/
-```
-
-The winning genome is retrained for the final model with `scripts.train_baseline` (the
-optimization script prints the exact command). Pass `--evaluations` to the random search
-equal to the GA's `fitness_evaluations` (46 for the default configuration) for a fair
-reference curve.
-
-## Tests
-
-```bash
-python -m pytest tests
-```
+Este es un prototipo de investigación y docencia. **No** es un dispositivo médico, no ha sido validado clínicamente y nunca debe usarse para diagnosticar, tratar o descartar una enfermedad. Todas las cifras son experimentos reproducibles sobre un conjunto de datos público.
