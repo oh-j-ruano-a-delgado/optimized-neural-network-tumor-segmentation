@@ -100,20 +100,23 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "model_step_title": "2 · Choose the AI model",
                 "advanced_title": "Advanced settings",
                 "model_checkpoint_label": "Model",
-                "model_baseline": "Baseline — hand-tuned reference (the starting point)",
-                "model_e": "Model E — small and fast (trained from scratch)",
+                "model_baseline": "Baseline — the starting point (before any optimization)",
+                "model_e": "Model E — best from scratch (no transfer learning)",
                 "model_f": "Model F — most accurate (transfer learning)",
                 "model_baseline_desc": (
-                    "The starting point of the project: a smaller network (16 filters "
-                    "instead of 32) trained with hand-chosen settings and no "
-                    "optimization. It is included so you can measure how far the other "
-                    "two models have come."
+                    "The baseline is the starting point of the project, before any "
+                    "optimization: a small network (16 filters) trained with "
+                    "hand-chosen settings and a fixed learning rate. The gap to model E "
+                    "is exactly the optimization work of this project."
                 ),
                 "model_e_desc": (
-                    "Model E learned everything by itself from this dataset alone: no prior "
-                    "knowledge, just 2,004 labelled MRI slices. Its hyperparameters were "
-                    "chosen by a genetic algorithm, so it is the small, quick option of the "
-                    "two."
+                    "E is the definitive model of the project trained without transfer "
+                    "learning. It uses the hyperparameters found by the genetic "
+                    "algorithm (learning rate and weight decay) and fixes the "
+                    "short-horizon bias of its fitness with extra capacity (32 "
+                    "filters), a cosine learning-rate schedule and a recalibrated "
+                    "Focal Tversky loss. It is the best model without pretrained "
+                    "weights."
                 ),
                 "model_f_desc": (
                     "Model F starts from a network that had already learned to see on "
@@ -130,11 +133,10 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                     "during training."
                 ),
                 "model_selector_note": (
-                    "Why these models? The baseline is the hand-tuned starting point, "
-                    "included as a reference; E and F are the final models of the "
-                    "research (the best trained from scratch and the best overall). "
-                    "The intermediate versions were strictly worse and were left out "
-                    "to keep this demo light."
+                    "From the baseline to E lies all the optimization work of the "
+                    "project (hyperparameters from the genetic algorithm, extra "
+                    "capacity, cosine schedule and a recalibrated loss); F adds "
+                    "transfer learning on top."
                 ),
                 "model_card_architecture": "Architecture: {architecture}",
                 "model_card_parameters": (
@@ -173,10 +175,11 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 ),
                 "about_title": "About this demo",
                 "about_body": (
-                    "- Three checkpoints are bundled. The baseline is the hand-tuned "
-                    "starting point (reference); E is a custom U-Net trained from "
-                    "scratch; F is a U-Net with a ResNet34 encoder pre-trained on ImageNet "
-                    "(transfer learning) and is the default.\n"
+                    "- Three checkpoints are bundled. The baseline is the starting "
+                    "point before any optimization; E is the definitive from-scratch "
+                    "model, with the hyperparameters found by the genetic algorithm; F "
+                    "is a U-Net with a ResNet34 encoder pre-trained on ImageNet "
+                    "(transfer learning).\n"
                     "- All three segment three tumor types (meningioma, glioma, pituitary) plus "
                     "background on 2D coronal slices of 256×256 pixels.\n"
                     "- Dice and IoU exclude the background because tumor regions cover a "
@@ -283,20 +286,24 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "model_step_title": "2 · Elige el modelo de IA",
                 "advanced_title": "Opciones avanzadas",
                 "model_checkpoint_label": "Modelo",
-                "model_baseline": "Base — referencia con ajustes manuales (el punto de partida)",
-                "model_e": "Modelo E — pequeño y rápido (entrenado desde cero)",
+                "model_baseline": "Base — el punto de partida (antes de optimizar)",
+                "model_e": "Modelo E — el mejor desde cero (sin transfer learning)",
                 "model_f": "Modelo F — el más preciso (transferencia de aprendizaje)",
                 "model_baseline_desc": (
-                    "El punto de partida del proyecto: una red más pequeña (16 filtros "
-                    "en lugar de 32) entrenada con ajustes elegidos a mano y sin "
-                    "optimización. Está aquí para medir cuánto han mejorado los otros "
-                    "dos modelos."
+                    "La base es el punto de partida del proyecto, anterior a cualquier "
+                    "optimización: una red pequeña (16 filtros) entrenada con ajustes "
+                    "elegidos a mano y una tasa de aprendizaje fija. La distancia hasta "
+                    "el modelo E es, precisamente, todo el trabajo de optimización de "
+                    "este proyecto."
                 ),
                 "model_e_desc": (
-                    "El modelo E aprendió todo por sí mismo usando solo este dataset: sin "
-                    "conocimiento previo, solo 2.004 cortes de resonancia etiquetados. Sus "
-                    "hiperparámetros los eligió un algoritmo genético, así que es la opción "
-                    "pequeña y rápida de las dos."
+                    "E es el modelo definitivo del proyecto entrenado sin transfer "
+                    "learning. Usa los hiperparámetros que encontró el algoritmo "
+                    "genético (tasa de aprendizaje y decaimiento de pesos) y corrige el "
+                    "sesgo de horizonte corto de la aptitud con más capacidad (32 "
+                    "filtros), recocido coseno de la tasa de aprendizaje y una pérdida "
+                    "Focal Tversky recalibrada. Es el mejor modelo sin pesos "
+                    "preentrenados."
                 ),
                 "model_f_desc": (
                     "El modelo F parte de una red que ya había aprendido a ver con millones "
@@ -315,11 +322,9 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                     "usaron durante el entrenamiento."
                 ),
                 "model_selector_note": (
-                    "¿Por qué estos modelos? La base es el punto de partida con ajustes "
-                    "manuales, incluida como referencia; E y F son los modelos finales "
-                    "de la investigación (el mejor entrenado desde cero y el mejor en "
-                    "general). Las versiones intermedias son peores y se dejaron fuera "
-                    "para mantener la demo ligera."
+                    "De la base a E está todo el trabajo de optimización del proyecto "
+                    "(hiperparámetros del AG, más capacidad, recocido coseno y pérdida "
+                    "recalibrada); F añade transfer learning encima."
                 ),
                 "model_card_architecture": "Arquitectura: {architecture}",
                 "model_card_parameters": (
@@ -359,10 +364,11 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 ),
                 "about_title": "Sobre esta demo",
                 "about_body": (
-                    "- Se incluyen tres checkpoints. La base es el punto de partida con "
-                    "ajustes manuales (referencia); E es una U-Net propia entrenada desde "
-                    "cero; F es una U-Net con codificador ResNet34 preentrenado en ImageNet "
-                    "(transferencia de aprendizaje) y es la opción por defecto.\n"
+                    "- Se incluyen tres checkpoints. La base es el punto de partida "
+                    "anterior a cualquier optimización; E es el modelo definitivo "
+                    "entrenado desde cero, con los hiperparámetros que encontró el "
+                    "algoritmo genético; F es una U-Net con codificador ResNet34 "
+                    "preentrenado en ImageNet (transferencia de aprendizaje).\n"
                     "- Los tres segmentan tres tipos de tumor (meningioma, glioma e hipófisis) "
                     "y el fondo en cortes coronales 2D de 256×256 píxeles.\n"
                     "- Dice e IoU excluyen el fondo porque las regiones tumorales ocupan una "
