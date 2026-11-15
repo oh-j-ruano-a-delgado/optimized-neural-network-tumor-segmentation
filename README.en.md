@@ -75,3 +75,7 @@ The code in this repository is released under the [MIT License](LICENSE). The da
 ## Medical disclaimer
 
 This is a research and teaching prototype. It is **not** a medical device, it has not been clinically validated, and it must never be used to diagnose, treat or rule out disease. All reported numbers are reproducible experiments on a public dataset.
+
+<p align="center">
+  <img width="50%" alt="image" src="https://github.com/user-attachments/assets/b4c47d04-6ee6-4bc7-af93-7d05c473e2d6" />
+</p>
