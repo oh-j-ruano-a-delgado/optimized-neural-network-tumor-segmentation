@@ -18,57 +18,34 @@ Universidad de Las Palmas de Gran Canaria · Asignatura *Optimización y Heurís
 
 ## Sobre el proyecto
 
-Este proyecto **segmenta automáticamente tumores cerebrales** en imágenes de resonancia magnética. A partir de un conjunto público de 3.064 cortes de RM con contraste, entrenamos redes U-Net que clasifican cada píxel de la imagen como fondo o como uno de los tres tipos de tumor más frecuentes —**meningioma, glioma e hipófisis**—, optimizamos sus hiperparámetros con un **algoritmo genético** escrito a mano y mejoramos el resultado final con **transfer learning**.
+Segmentar tumores cerebrales en una resonancia magnética es, para una red neuronal, un problema difícil por dos razones: el tumor ocupa de media solo el **1,7 % de los píxeles** de cada corte (un fuerte desequilibrio de clases) y el criterio de un experto no es exacto al milímetro. Este proyecto aborda el reto planteándolo como un **problema de optimización en dos niveles**:
 
-El mejor modelo alcanza un **Dice medio de 0.825** en el conjunto de prueba (0.134 por encima del modelo base, entrenado con ajustes manuales) y es el motor de la demo interactiva de este repositorio.
+- **Nivel interno — entrenar bien la red.** El entrenamiento de una U-Net se formula como la minimización de una función de pérdida no convexa sobre entre 1,8 y 7,2 millones de parámetros, resuelta con descenso de gradiente estocástico (Adam). Desde la óptica de la optimización analizamos la arquitectura, las funciones de pérdida sustitutas (Dice, Focal y Focal Tversky) y la programación de la tasa de aprendizaje.
+- **Nivel externo — ajustar los hiperparámetros.** Los cuatro hiperparámetros que condicionan ese entrenamiento (tasa de aprendizaje, decaimiento de pesos, número de filtros y profundidad) los ajusta un **algoritmo genético propio** de codificación real, con selección por torneo, cruce BLX-α, mutación gaussiana con reflexión y elitismo, y una función de aptitud de baja fidelidad: el Dice de validación tras solo tres épocas de entrenamiento.
+
+Con 46 evaluaciones, el algoritmo genético mejora la aptitud de la configuración manual de 0.441 a 0.509 y, reentrenada a longitud completa, la configuración evolucionada eleva el Dice medio en el conjunto de prueba de **0.691 a 0.776**. El análisis posterior de la solución heurística revela un *sesgo de horizonte corto* en la aptitud —favorece redes pequeñas de convergencia rápida—, que corregimos con mayor capacidad, recocido coseno de la tasa de aprendizaje y una calibración de la pérdida guiada por diagnóstico: el modelo entrenado desde cero final alcanza **0.8175**, y con transfer learning desde una ResNet34 preentrenada, **0.8250** —un **0.134** por encima del punto de partida—. El algoritmo genético, por sí solo, explica aproximadamente **dos tercios de la mejora total**.
+
+Todo se valida con un split *por paciente* sobre un dataset público de 3.064 cortes, y el proyecto se completa con una **demo interactiva bilingüe** que cualquiera puede ejecutar en el navegador.
 
 ## Demo
 
-> **Demo en vivo:** *próximamente — se publicará en Streamlit Community Cloud.*
-
-Para probarla en local:
-
-```bash
-git clone https://github.com/oh-j-ruano-a-delgado/optimized-neural-network-tumor-segmentation.git
-cd optimized-neural-network-tumor-segmentation
-pip install -r requirements.txt
-streamlit run app/main.py
-```
-
-La demo es **bilingüe (español/inglés)** y no requiere conocimientos médicos: elige una imagen de ejemplo o sube la tuya, compara los tres modelos, mira dónde el tumor fue detectado (superposición por color, máscara y mapa de confianza por píxel) y lee la interpretación en lenguaje llano con el tipo de tumor encontrado y su tamaño relativo.
-
-## Resultados
-
-| Modelo | Qué es | Mejor Dice (val.) | Dice medio (test) | Tumor completo (test) |
-|---|---|---:|---:|---:|
-| Baseline | Ajustes manuales (U-Net, 16 filtros) | 0.654 | 0.691 | 0.623 |
-| **A** | Ganador del algoritmo genético, reentrenado | 0.770 | 0.776 | 0.723 |
-| **E** | U-Net más ancho (32 filtros) + Focal Tversky + LR cosenoidal | 0.761 | 0.818 | 0.776 |
-| **F** | Transfer learning desde una ResNet34 preentrenada | 0.822 | **0.825** | 0.765 |
-
-El *Dice* mide la superposición entre la predicción y la anotación del experto (1.00 = perfecto). Las cifras de test promedian meningioma, glioma e hipófisis sobre **592 cortes de prueba** de **46 pacientes** que nunca se usaron para entrenar ni seleccionar modelos. Además, el modelo base detecta tumor en el 90.7 % de esos cortes y el modelo A en el 93.4 %, ambos sin falsos positivos.
-
-El modelo F es significativamente mejor que E en meningioma (+0.029) pero algo peor en gliomas (−0.028): la tabla completa del análisis está en el informe.
-
-## ¿Qué modelos incluye la demo?
-
-La demo incluye tres puntos de comparación, del más básico al más avanzado:
-
-- **Base (baseline)** — el punto de partida del proyecto: una U-Net pequeña (16 filtros) entrenada con ajustes elegidos a mano. Se incluye como **referencia** para ver de verdad la mejora de los demás modelos (0.691 → 0.825 de Dice medio).
-- **E** — el mejor modelo entrenado desde cero: U-Net de 32 filtros con Focal Tversky y LR cosenoidal (0.818).
-- **F** — el mejor de todos: parte de una ResNet34 preentrenada en ImageNet (transfer learning, 0.825). Es el que se muestra por defecto.
-
-Las versiones intermedias (el ganador del algoritmo genético y los experimentos de pérdida y aumento de datos) son estrictamente peores que E y F, así que no se incluyen: solo añadirían peso descargado sin aportar nada nuevo a quien visita la demo.
-
-¿Quieres añadir otro modelo? Basta exportar su checkpoint con `scripts/export_checkpoint_fp16.py` y registrarlo en `app/segmentation.py`.
+> **Enlace a la demo:** _próximamente — se publicará en Streamlit Community Cloud._
 
 ## Cómo funciona
 
-1. **Datos** — 3.064 cortes de RM de 233 pacientes (Figshare), divididos *por paciente* para que ningún paciente aparezca a la vez en entrenamiento y prueba.
-2. **Modelo** — una red U-Net (codificador–descodificador) clasifica cada píxel en fondo, meningioma, glioma o hipófisis.
-3. **Pérdida** — Dice-Focal, y Focal-Tversky en los últimos modelos, para compensar que el tumor ocupa una fracción mínima de cada imagen (clase mayoritaria vs. minoritaria).
-4. **Optimización** — un algoritmo genético propio ajusta la tasa de aprendizaje, la penalización L2 y el ancho/profundidad de la red, y se compara contra una búsqueda aleatoria con el mismo presupuesto de evaluaciones.
-5. **Transfer learning** — el modelo final parte de un codificador ResNet34 preentrenado con ImageNet y se adapta a resonancias magnéticas, con una tasa de aprendizaje reducida para el codificador.
+1. **Datos con corte por paciente.** 3.064 cortes T1 con contraste de 233 pacientes (dataset Figshare), repartidos en 2.004 para entrenamiento, 468 de validación y 592 de prueba. El reparto es por paciente, no por imagen: ningún paciente aparece a la vez en entrenamiento y prueba, y el conjunto de prueba **no se usa nunca** para elegir modelos ni hiperparámetros.
+
+2. **Una U-Net que clasifica cada píxel.** Arquitectura codificador–descodificador habitual en segmentación médica: cada píxel de la imagen se clasifica como fondo, meningioma, glioma o hipófisis.
+
+3. **Pérdidas diseñadas para el desequilibrio de clases.** Como el tumor ocupa una fracción mínima de la imagen, una pérdida por píxel trivial aprendería a predecir «fondo» siempre. Combinamos el coeficiente Dice (solape con la anotación del experto) con las pérdidas Focal y Focal Tversky, que penalizan más los falsos negativos, y calibramos sus pesos con un análisis de errores (precisión/sensibilidad por clase y matrices de confusión).
+
+4. **Aumento de datos y programación del aprendizaje.** Diseño factorial 2×2 de aumento de datos (espacial / de intensidad) y comparación de tasas de aprendizaje constantes frente a recocido coseno, con selección de modelo mediante parada temprana sobre el conjunto de validación.
+
+5. **Optimización externa con algoritmo genético.** Un AG en codificación real ajusta tasa de aprendizaje, decaimiento de pesos, filtros y profundidad. La aptitud se mide a baja fidelidad (Dice de validación a tres épocas) con memoización, lo que permite **46 evaluaciones** en total; se compara contra una **búsqueda aleatoria con idéntico presupuesto** como referencia justa. Además, el resultado se analiza críticamente: el AG converge 3,2 veces más rápido que la búsqueda aleatoria, pero su aptitud tiene sesgo de horizonte corto, defecto que identificamos y corregimos en la fase de refinamiento.
+
+6. **Transfer learning como complemento.** El mejor modelo sin preentrenar se contrasta con una U-Net cuyo codificador ResNet34 viene preentrenado en ImageNet (tasa reducida para el codificador): mejora la confusión entre tipos de tumor, sin mejora estadísticamente significativa en la delimitación (intervalos de confiancia por bootstrap de pacientes).
+
+7. **Evaluación rigurosa.** Dice e IoU por clase, tasa de detección por corte (cuántos tumores pequeños se escapan), análisis de falsos positivos y negativos, y comparación por pares con reentrenamientos controlados. Los puntos de control se seleccionan en validación y se evalúan una sola vez en prueba.
 
 ## Datos
 
