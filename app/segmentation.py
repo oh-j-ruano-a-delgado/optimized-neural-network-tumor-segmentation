@@ -35,17 +35,20 @@ PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 MODELS_DIR: Final[Path] = PROJECT_ROOT / "app" / "models"
 SAMPLES_DIR: Final[Path] = PROJECT_ROOT / "app" / "samples"
 
+BASELINE_MODEL_KEY: Final[str] = "baseline"
 FROM_SCRATCH_MODEL_KEY: Final[str] = "e"
 TRANSFER_MODEL_KEY: Final[str] = "f"
 DEFAULT_MODEL_KEY: Final[str] = TRANSFER_MODEL_KEY
 MODEL_CHECKPOINTS: Final[Mapping[str, Path]] = MappingProxyType(
     {
+        BASELINE_MODEL_KEY: MODELS_DIR / "baseline_unet.pth",
         FROM_SCRATCH_MODEL_KEY: MODELS_DIR / "e_unet.pth",
         TRANSFER_MODEL_KEY: MODELS_DIR / "f_smp_unet_fp16.pth",
     }
 )
 MODEL_LABELS: Final[Mapping[str, str]] = MappingProxyType(
     {
+        BASELINE_MODEL_KEY: "Baseline · hand-tuned reference U-Net",
         FROM_SCRATCH_MODEL_KEY: "E · U-Net trained from scratch",
         TRANSFER_MODEL_KEY: "F · ResNet34 U-Net (transfer learning)",
     }
@@ -86,6 +89,7 @@ class SegmentationModel:
 class OfflineMetrics:
     test_mean_dice: float
     test_whole_tumor_dice: float
+    class_dice: Mapping[str, float]
     training_epochs: int
     training_minutes: float
 
@@ -122,15 +126,30 @@ class SampleImage:
 
 OFFLINE_METRICS: Final[Mapping[str, OfflineMetrics]] = MappingProxyType(
     {
+        BASELINE_MODEL_KEY: OfflineMetrics(
+            test_mean_dice=0.690467,
+            test_whole_tumor_dice=0.623029,
+            class_dice=MappingProxyType(
+                {"meningioma": 0.8258, "glioma": 0.4471, "pituitary": 0.7985}
+            ),
+            training_epochs=40,
+            training_minutes=36.4,
+        ),
         FROM_SCRATCH_MODEL_KEY: OfflineMetrics(
             test_mean_dice=0.817545,
             test_whole_tumor_dice=0.776214,
+            class_dice=MappingProxyType(
+                {"meningioma": 0.8935, "glioma": 0.7134, "pituitary": 0.8456}
+            ),
             training_epochs=150,
             training_minutes=78.1,
         ),
         TRANSFER_MODEL_KEY: OfflineMetrics(
             test_mean_dice=0.824963,
             test_whole_tumor_dice=0.765232,
+            class_dice=MappingProxyType(
+                {"meningioma": 0.9220, "glioma": 0.6854, "pituitary": 0.8671}
+            ),
             training_epochs=100,
             training_minutes=47.2,
         ),

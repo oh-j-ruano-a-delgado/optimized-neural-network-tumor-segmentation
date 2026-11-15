@@ -184,12 +184,15 @@ pip install -r requirements.txt
 streamlit run app/main.py
 ```
 
-The app ships two checkpoints: `app/models/e_unet.pth` (model E, custom U-Net trained
-from scratch) and `app/models/f_smp_unet_fp16.pth` (model F, U-Net with a ResNet34
-encoder pre-trained on ImageNet, stored in half precision and cast to float32 at load
-time). To refresh a checkpoint, copy a trained `runs/.../best_model.pth` over it:
+The app ships three checkpoints: `app/models/baseline_unet.pth` (the hand-tuned
+reference model, included for comparison), `app/models/e_unet.pth` (model E, custom
+U-Net trained from scratch) and `app/models/f_smp_unet_fp16.pth` (model F, U-Net with
+a ResNet34 encoder pre-trained on ImageNet, stored in half precision and cast to
+float32 at load time). To refresh a checkpoint, copy a trained `runs/.../best_model.pth`
+over it:
 
 ```bash
+cp runs/baseline_vs_ga/01_baseline_manual/best_model.pth app/models/baseline_unet.pth
 cp runs/capacity_and_lr_schedule/10_E_ultimate_unet/best_model.pth app/models/e_unet.pth
 python -m scripts.export_checkpoint_fp16 --checkpoint runs/transfer_learning/13_F_smp_unet_resnet34/best_model.pth --output app/models/f_smp_unet_fp16.pth
 ```
@@ -296,7 +299,7 @@ app/                      bilingual Streamlit demo
   main.py                 UI: guided 4-step flow, no sidebar
   segmentation.py         model loading, preprocessing, inference helpers
   i18n.py                 English / Spanish copy
-  models/                 e_unet.pth and f_smp_unet_fp16.pth
+  models/                 baseline_unet.pth, e_unet.pth and f_smp_unet_fp16.pth
   samples/                example test slices, one labelled "challenging case"
 data/raw/                 Training/ and Testing/ PNGs (gitignored, download script)
 docs/                     README assets, this guide, report sources

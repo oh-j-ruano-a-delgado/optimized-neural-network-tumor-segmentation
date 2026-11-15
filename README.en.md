@@ -35,7 +35,7 @@ pip install -r requirements.txt
 streamlit run app/main.py
 ```
 
-The demo is **bilingual (English/Spanish)** and requires no medical knowledge: pick one of the example slices or upload your own, compare the two models, see where the tumor was found (color overlay, mask and per-pixel confidence map) and read a plain-language interpretation with the detected tumor type and its relative size.
+The demo is **bilingual (English/Spanish)** and requires no medical knowledge: pick one of the example slices or upload your own, compare the three models, see where the tumor was found (color overlay, mask and per-pixel confidence map) and read a plain-language interpretation with the detected tumor type and its relative size.
 
 ## Results
 
@@ -50,13 +50,15 @@ The demo is **bilingual (English/Spanish)** and requires no medical knowledge: p
 
 Model F is significantly better than E on meningioma (+0.029) but slightly worse on gliomas (−0.028); the full analysis is in the report.
 
-## Why only two models in the demo?
+## Which models does the demo include?
 
-The demo ships **E** and **F**, the two final models of the research:
+The demo ships three comparison points, from the most basic to the most advanced:
 
-- **E** is the best model trained from scratch and **F** the best overall; they embody exactly the two conclusions of the project: is it worth widening and retraining the network from scratch, or starting from an already-trained one?
-- *Baseline* and *A* were intermediate steps of the same pipeline. They are strictly worse than E and F, so they would only add download weight (~74 MB of checkpoints already included) and slower load times without giving visitors anything new.
-- Both models do exactly the same job (the same four classes on 256×256 slices), so the comparison is direct and fair.
+- **Baseline** — the starting point of the project: a small U-Net (16 filters) trained with hand-chosen settings. It is included as a **reference** so you can really see how far the other models have come (0.691 → 0.825 mean Dice).
+- **E** — the best model trained from scratch: a 32-filter U-Net with Focal Tversky and a cosine learning rate (0.818).
+- **F** — the best overall: it starts from an ImageNet-pretrained ResNet34 (transfer learning, 0.825) and is the default.
+
+The intermediate versions (the genetic-algorithm winner and the loss/augmentation experiments) are strictly worse than E and F, so they are not included: they would only add download weight without giving visitors anything new.
 
 Want to add another model? Export its checkpoint with `scripts/export_checkpoint_fp16.py` and register it in `app/segmentation.py`.
 
@@ -76,7 +78,7 @@ Jun Cheng, *brain tumor dataset*, figshare (2015), <https://doi.org/10.6084/m9.f
 ## Repository layout
 
 ```
-app/        bilingual Streamlit demo (Spanish/English) with models E and F
+app/        bilingual Streamlit demo (Spanish/English) with the baseline, E and F
 src/        data pipeline, U-Net networks, loss functions and genetic algorithm
 scripts/    training, optimization, evaluation and plotting
 tests/      pytest test suite

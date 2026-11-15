@@ -35,7 +35,7 @@ pip install -r requirements.txt
 streamlit run app/main.py
 ```
 
-La demo es **bilingüe (español/inglés)** y no requiere conocimientos médicos: elige una imagen de ejemplo o sube la tuya, compara los dos modelos, mira dónde el tumor fue detectado (superposición por color, máscara y mapa de confianza por píxel) y lee la interpretación en lenguaje llano con el tipo de tumor encontrado y su tamaño relativo.
+La demo es **bilingüe (español/inglés)** y no requiere conocimientos médicos: elige una imagen de ejemplo o sube la tuya, compara los tres modelos, mira dónde el tumor fue detectado (superposición por color, máscara y mapa de confianza por píxel) y lee la interpretación en lenguaje llano con el tipo de tumor encontrado y su tamaño relativo.
 
 ## Resultados
 
@@ -50,13 +50,15 @@ El *Dice* mide la superposición entre la predicción y la anotación del expert
 
 El modelo F es significativamente mejor que E en meningioma (+0.029) pero algo peor en gliomas (−0.028): la tabla completa del análisis está en el informe.
 
-## ¿Por qué solo dos modelos en la demo?
+## ¿Qué modelos incluye la demo?
 
-La demo incluye **E** y **F**, los dos modelos finales de la investigación:
+La demo incluye tres puntos de comparación, del más básico al más avanzado:
 
-- **E** es el mejor modelo entrenado desde cero y **F** el mejor de todos; representan justamente las dos conclusiones del proyecto: ¿merece la pena ensanchar y reentrenar la red desde cero, o partir de un modelo ya entrenado?
-- *Baseline* y *A* fueron pasos intermedios de la misma pipeline. Son estrictamente peores que E y F, así que solo añadirían peso descargado (~74 MB de checkpoints ya incluidos) y más tiempo de carga sin aportar nada nuevo a quien visita la demo.
-- Ambos modelos hacen exactamente lo mismo (las mismas cuatro clases sobre cortes de 256×256), así que la comparación es directa y justa.
+- **Base (baseline)** — el punto de partida del proyecto: una U-Net pequeña (16 filtros) entrenada con ajustes elegidos a mano. Se incluye como **referencia** para ver de verdad la mejora de los demás modelos (0.691 → 0.825 de Dice medio).
+- **E** — el mejor modelo entrenado desde cero: U-Net de 32 filtros con Focal Tversky y LR cosenoidal (0.818).
+- **F** — el mejor de todos: parte de una ResNet34 preentrenada en ImageNet (transfer learning, 0.825). Es el que se muestra por defecto.
+
+Las versiones intermedias (el ganador del algoritmo genético y los experimentos de pérdida y aumento de datos) son estrictamente peores que E y F, así que no se incluyen: solo añadirían peso descargado sin aportar nada nuevo a quien visita la demo.
 
 ¿Quieres añadir otro modelo? Basta exportar su checkpoint con `scripts/export_checkpoint_fp16.py` y registrarlo en `app/segmentation.py`.
 
@@ -76,7 +78,7 @@ Jun Cheng, *brain tumor dataset*, figshare (2015), <https://doi.org/10.6084/m9.f
 ## Estructura del repositorio
 
 ```
-app/        demo en Streamlit (español/inglés) con los modelos E y F
+app/        demo en Streamlit (español/inglés) con el baseline, los modelos E y F
 src/        datos, redes U-Net, funciones de pérdida y algoritmo genético
 scripts/    entrenamiento, optimización, evaluación y gráficas
 tests/      suite de pruebas (pytest)

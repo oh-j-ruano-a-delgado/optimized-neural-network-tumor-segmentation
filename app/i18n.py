@@ -5,7 +5,7 @@ from typing import Final, Mapping
 
 ENGLISH: Final[str] = "en"
 SPANISH: Final[str] = "es"
-DEFAULT_LANGUAGE: Final[str] = ENGLISH
+DEFAULT_LANGUAGE: Final[str] = SPANISH
 LANGUAGE_LABELS: Final[Mapping[str, str]] = MappingProxyType(
     {ENGLISH: "English", SPANISH: "Español"}
 )
@@ -16,8 +16,8 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
             {
                 "app_title": "Brain Tumor Segmentation",
                 "app_subtitle": (
-                    "Pick an MRI scan and see how a neural network finds brain tumors. "
-                    "No medical knowledge needed."
+                    "A U-Net tuned by a genetic algorithm and transfer learning that "
+                    "finds meningioma, glioma and pituitary tumors in MRI scans."
                 ),
                 "language_label": "Language",
                 "intro_title": "How does this work?",
@@ -59,13 +59,13 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "no_file_info": "Pick an example scan above or upload your own PNG to start.",
                 "no_samples_warning": "No bundled samples were found in `app/samples`.",
                 "running_inference": "Running inference...",
-                "step2_title": "2 · What the model sees",
+                "step2_title": "3 · What the model sees",
                 "view_input": "Input slice (as the model sees it)",
                 "view_overlay": "Tumor types on the scan",
                 "view_mask": "Predicted regions only",
                 "view_confidence": "Confidence (brighter = more sure)",
                 "legend_caption": "Colors for each tumor type:",
-                "step3_title": "3 · What did the model find?",
+                "step3_title": "4 · What did the model find?",
                 "interpretation_tumor": (
                     "**Tumor region detected:** about **{area:.1f}%** of the slice, mostly "
                     "**{dominant}**."
@@ -97,25 +97,54 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "region_background": "Healthy tissue / background",
                 "download_mask": "Download mask (PNG)",
                 "download_overlay": "Download overlay (PNG)",
+                "model_step_title": "2 · Choose the AI model",
                 "advanced_title": "Advanced settings",
-                "model_checkpoint_label": "Checkpoint",
-                "model_e": "E · U-Net from scratch",
-                "model_f": "F · ResNet34 U-Net (transfer)",
+                "model_checkpoint_label": "Model",
+                "model_baseline": "Baseline — hand-tuned reference (the starting point)",
+                "model_e": "Model E — small and fast (trained from scratch)",
+                "model_f": "Model F — most accurate (transfer learning)",
+                "model_baseline_desc": (
+                    "The starting point of the project: a smaller network (16 filters "
+                    "instead of 32) trained with hand-chosen settings and no "
+                    "optimization. It is included so you can measure how far the other "
+                    "two models have come."
+                ),
                 "model_e_desc": (
-                    "Trained from random initialization; the genetic algorithm chose its "
-                    "learning rate, weight decay, filters and depth."
+                    "Model E learned everything by itself from this dataset alone: no prior "
+                    "knowledge, just 2,004 labelled MRI slices. Its hyperparameters were "
+                    "chosen by a genetic algorithm, so it is the small, quick option of the "
+                    "two."
                 ),
                 "model_f_desc": (
-                    "Starts from a ResNet34 encoder pre-trained on ImageNet and is fine-tuned "
-                    "on MRI slices."
+                    "Model F starts from a network that had already learned to see on "
+                    "millions of everyday photos, then adapted it to MRI scans. It is the "
+                    "larger, slower option and the most accurate of the project."
                 ),
                 "model_missing": "Only the checkpoints present in `app/models` can be selected.",
-                "model_card_architecture": "Architecture: {architecture}",
-                "model_card_parameters": "Trainable parameters: {parameters}",
-                "model_card_test_dice": (
-                    "Held-out test Dice: {mean} mean · {whole} whole tumor"
+                "model_results_line": (
+                    "Test-set score: mean Dice **{mean}** — {classes}."
                 ),
-                "model_card_training": "Training budget: {epochs} epochs · {minutes:.1f} min",
+                "dice_explain": (
+                    "Dice measures how much the prediction overlaps the expert's annotation "
+                    "(1.00 = perfect, 0 = none). These 592 test slices were never used "
+                    "during training."
+                ),
+                "model_selector_note": (
+                    "Why these models? The baseline is the hand-tuned starting point, "
+                    "included as a reference; E and F are the final models of the "
+                    "research (the best trained from scratch and the best overall). "
+                    "The intermediate versions were strictly worse and were left out "
+                    "to keep this demo light."
+                ),
+                "model_card_architecture": "Architecture: {architecture}",
+                "model_card_parameters": (
+                    "Model size: {parameters} parameters (more parameters = slower, "
+                    "usually more accurate)"
+                ),
+                "model_card_training": "Training: {epochs} epochs · {minutes:.1f} min",
+                "model_card_whole_tumor": (
+                    "Whole-tumor score on the test set (all types together): {dice}"
+                ),
                 "challenging_suffix": "challenging case",
                 "challenging_hint": (
                     "Challenging case: model F returns an empty mask here even though a small "
@@ -137,12 +166,18 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                     "Research demo trained on the Figshare brain tumor dataset. It is not a "
                     "medical device and must not be used for diagnosis."
                 ),
+                "credits": (
+                    "Javier Ruano Hernández · Alejandro Delgado Valera — University of "
+                    "Las Palmas de Gran Canaria · Optimization and Heuristics · Academic "
+                    "year 2026–2027"
+                ),
                 "about_title": "About this demo",
                 "about_body": (
-                    "- Two checkpoints are bundled. E is a custom U-Net trained from "
+                    "- Three checkpoints are bundled. The baseline is the hand-tuned "
+                    "starting point (reference); E is a custom U-Net trained from "
                     "scratch; F is a U-Net with a ResNet34 encoder pre-trained on ImageNet "
                     "(transfer learning) and is the default.\n"
-                    "- Both segment three tumor types (meningioma, glioma, pituitary) plus "
+                    "- All three segment three tumor types (meningioma, glioma, pituitary) plus "
                     "background on 2D coronal slices of 256×256 pixels.\n"
                     "- Dice and IoU exclude the background because tumor regions cover a "
                     "tiny part of each slice.\n"
@@ -158,8 +193,9 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
             {
                 "app_title": "Segmentación de tumores cerebrales",
                 "app_subtitle": (
-                    "Elige una resonancia y observa cómo una red neuronal localiza tumores "
-                    "cerebrales. No hace falta saber medicina."
+                    "Una U-Net afinada con un algoritmo genético y transfer learning "
+                    "que localiza meningiomas, gliomas y tumores de hipófisis en "
+                    "resonancias magnéticas."
                 ),
                 "language_label": "Idioma",
                 "intro_title": "¿Cómo funciona?",
@@ -203,13 +239,13 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "no_file_info": "Elige un ejemplo arriba o sube tu propio PNG para empezar.",
                 "no_samples_warning": "No se han encontrado muestras en `app/samples`.",
                 "running_inference": "Calculando la segmentación...",
-                "step2_title": "2 · Lo que ve el modelo",
+                "step2_title": "3 · Lo que ve el modelo",
                 "view_input": "Corte de entrada (tal como lo ve el modelo)",
                 "view_overlay": "Tipos de tumor sobre la resonancia",
                 "view_mask": "Solo las regiones predichas",
                 "view_confidence": "Confianza (más brillante = más segura)",
                 "legend_caption": "Color de cada tipo de tumor:",
-                "step3_title": "3 · ¿Qué ha encontrado el modelo?",
+                "step3_title": "4 · ¿Qué ha encontrado el modelo?",
                 "interpretation_tumor": (
                     "**Región tumoral detectada:** aproximadamente el **{area:.1f}%** del "
                     "corte, sobre todo **{dominant}**."
@@ -244,28 +280,55 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "region_background": "Tejido sano / fondo",
                 "download_mask": "Descargar máscara (PNG)",
                 "download_overlay": "Descargar superposición (PNG)",
+                "model_step_title": "2 · Elige el modelo de IA",
                 "advanced_title": "Opciones avanzadas",
-                "model_checkpoint_label": "Checkpoint",
-                "model_e": "E · U-Net desde cero",
-                "model_f": "F · U-Net ResNet34 (transferencia)",
+                "model_checkpoint_label": "Modelo",
+                "model_baseline": "Base — referencia con ajustes manuales (el punto de partida)",
+                "model_e": "Modelo E — pequeño y rápido (entrenado desde cero)",
+                "model_f": "Modelo F — el más preciso (transferencia de aprendizaje)",
+                "model_baseline_desc": (
+                    "El punto de partida del proyecto: una red más pequeña (16 filtros "
+                    "en lugar de 32) entrenada con ajustes elegidos a mano y sin "
+                    "optimización. Está aquí para medir cuánto han mejorado los otros "
+                    "dos modelos."
+                ),
                 "model_e_desc": (
-                    "Entrenada desde inicialización aleatoria; el algoritmo genético eligió "
-                    "su tasa de aprendizaje, regularización, filtros y profundidad."
+                    "El modelo E aprendió todo por sí mismo usando solo este dataset: sin "
+                    "conocimiento previo, solo 2.004 cortes de resonancia etiquetados. Sus "
+                    "hiperparámetros los eligió un algoritmo genético, así que es la opción "
+                    "pequeña y rápida de las dos."
                 ),
                 "model_f_desc": (
-                    "Parte de un codificador ResNet34 preentrenado en ImageNet y se ajusta "
-                    "con cortes de resonancia."
+                    "El modelo F parte de una red que ya había aprendido a ver con millones "
+                    "de fotos cotidianas y la adaptó a resonancias. Es la opción grande y "
+                    "lenta, y la más precisa de todo el proyecto."
                 ),
                 "model_missing": (
                     "Solo se pueden elegir los checkpoints presentes en `app/models`."
                 ),
-                "model_card_architecture": "Arquitectura: {architecture}",
-                "model_card_parameters": "Parámetros entrenables: {parameters}",
-                "model_card_test_dice": (
-                    "Dice en test reservado: {mean} medio · {whole} tumor completo"
+                "model_results_line": (
+                    "Resultado en test: Dice medio **{mean}** — {classes}."
                 ),
-                "model_card_training": (
-                    "Presupuesto de entrenamiento: {epochs} épocas · {minutes:.1f} min"
+                "dice_explain": (
+                    "El Dice mide cuánto se solapa la predicción con la anotación del "
+                    "experto (1,00 = perfecto, 0 = nada). Estos 592 cortes de test nunca se "
+                    "usaron durante el entrenamiento."
+                ),
+                "model_selector_note": (
+                    "¿Por qué estos modelos? La base es el punto de partida con ajustes "
+                    "manuales, incluida como referencia; E y F son los modelos finales "
+                    "de la investigación (el mejor entrenado desde cero y el mejor en "
+                    "general). Las versiones intermedias son peores y se dejaron fuera "
+                    "para mantener la demo ligera."
+                ),
+                "model_card_architecture": "Arquitectura: {architecture}",
+                "model_card_parameters": (
+                    "Tamaño del modelo: {parameters} parámetros (más parámetros = más "
+                    "lento, normalmente más preciso)"
+                ),
+                "model_card_training": "Entrenamiento: {epochs} épocas · {minutes:.1f} min",
+                "model_card_whole_tumor": (
+                    "Puntuación del tumor completo en test (los tres tipos juntos): {dice}"
                 ),
                 "challenging_suffix": "caso difícil",
                 "challenging_hint": (
@@ -289,12 +352,18 @@ TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                     "tumores cerebrales. No es un dispositivo médico y no debe usarse para "
                     "diagnóstico."
                 ),
+                "credits": (
+                    "Javier Ruano Hernández · Alejandro Delgado Valera — Universidad de "
+                    "Las Palmas de Gran Canaria · Optimización y Heurística · Curso "
+                    "2026–2027"
+                ),
                 "about_title": "Sobre esta demo",
                 "about_body": (
-                    "- Se incluyen dos checkpoints. E es una U-Net propia entrenada desde "
+                    "- Se incluyen tres checkpoints. La base es el punto de partida con "
+                    "ajustes manuales (referencia); E es una U-Net propia entrenada desde "
                     "cero; F es una U-Net con codificador ResNet34 preentrenado en ImageNet "
                     "(transferencia de aprendizaje) y es la opción por defecto.\n"
-                    "- Ambas segmentan tres tipos de tumor (meningioma, glioma e hipófisis) "
+                    "- Los tres segmentan tres tipos de tumor (meningioma, glioma e hipófisis) "
                     "y el fondo en cortes coronales 2D de 256×256 píxeles.\n"
                     "- Dice e IoU excluyen el fondo porque las regiones tumorales ocupan una "
                     "parte mínima de cada corte.\n"
