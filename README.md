@@ -23,13 +23,13 @@ Segmentar tumores cerebrales en una resonancia magnética es, para una red neuro
 - **Nivel interno — entrenar bien la red.** El entrenamiento de una U-Net se formula como la minimización de una función de pérdida no convexa sobre entre 1,8 y 7,2 millones de parámetros, resuelta con descenso de gradiente estocástico (Adam). Desde la óptica de la optimización analizamos la arquitectura, las funciones de pérdida sustitutas (Dice, Focal y Focal Tversky) y la programación de la tasa de aprendizaje.
 - **Nivel externo — ajustar los hiperparámetros.** Los cuatro hiperparámetros que condicionan ese entrenamiento (tasa de aprendizaje, decaimiento de pesos, número de filtros y profundidad) los ajusta un **algoritmo genético propio** de codificación real, con selección por torneo, cruce BLX-α, mutación gaussiana con reflexión y elitismo, y una función de aptitud de baja fidelidad: el Dice de validación tras solo tres épocas de entrenamiento.
 
-Con 46 evaluaciones, el algoritmo genético mejora la aptitud de la configuración manual de 0.441 a 0.509 y, reentrenada a longitud completa, la configuración evolucionada eleva el Dice medio en el conjunto de prueba de **0.691 a 0.776**. El análisis posterior de la solución heurística revela un *sesgo de horizonte corto* en la aptitud —favorece redes pequeñas de convergencia rápida—, que corregimos con mayor capacidad, recocido coseno de la tasa de aprendizaje y una calibración de la pérdida guiada por diagnóstico: el modelo entrenado desde cero final alcanza **0.8175**, y con transfer learning desde una ResNet34 preentrenada, **0.8250** —un **0.134** por encima del punto de partida—. El algoritmo genético, por sí solo, explica aproximadamente **dos tercios de la mejora total**.
+Con 46 evaluaciones, el algoritmo genético mejora la aptitud de la configuración manual de 0.441 a 0.509 y, reentrenada a longitud completa, la configuración evolucionada eleva el Dice medio en el conjunto de prueba de **0.691 a 0.776**. El análisis posterior de la solución heurística revela un *sesgo de horizonte corto* en la aptitud —favorece redes pequeñas de convergencia rápida—, que corregimos con mayor capacidad, *cosine annealing* de la tasa de aprendizaje y una calibración de la pérdida guiada por diagnóstico: el modelo entrenado desde cero final alcanza **0.8175**, y con transfer learning desde una ResNet34 preentrenada, **0.8250** —un **0.134** por encima del punto de partida—. El algoritmo genético, por sí solo, explica aproximadamente **dos tercios de la mejora total**.
 
 Todo se valida con un split *por paciente* sobre un dataset público de 3.064 cortes, y el proyecto se completa con una **demo interactiva bilingüe** que cualquiera puede ejecutar en el navegador.
 
 ## Demo
 
-> **Enlace a la demo:** _próximamente — se publicará en Streamlit Community Cloud._
+> **Enlace a la demo:** [streamlit.app](https://unet-tumor-segmentation-jruano-adelgado.streamlit.app/)
 
 ## Cómo funciona
 
@@ -39,7 +39,7 @@ Todo se valida con un split *por paciente* sobre un dataset público de 3.064 co
 
 3. **Pérdidas diseñadas para el desequilibrio de clases.** Como el tumor ocupa una fracción mínima de la imagen, una pérdida por píxel trivial aprendería a predecir «fondo» siempre. Combinamos el coeficiente Dice (solape con la anotación del experto) con las pérdidas Focal y Focal Tversky, que penalizan más los falsos negativos, y calibramos sus pesos con un análisis de errores (precisión/sensibilidad por clase y matrices de confusión).
 
-4. **Aumento de datos y programación del aprendizaje.** Diseño factorial 2×2 de aumento de datos (espacial / de intensidad) y comparación de tasas de aprendizaje constantes frente a recocido coseno, con selección de modelo mediante parada temprana sobre el conjunto de validación.
+4. **Aumento de datos y programación del aprendizaje.** Diseño factorial 2×2 de aumento de datos (espacial / de intensidad) y comparación de tasas de aprendizaje constantes frente a *cosine annealing*, con selección de modelo mediante parada temprana sobre el conjunto de validación.
 
 5. **Optimización externa con algoritmo genético.** Un AG en codificación real ajusta tasa de aprendizaje, decaimiento de pesos, filtros y profundidad. La aptitud se mide a baja fidelidad (Dice de validación a tres épocas) con memoización, lo que permite **46 evaluaciones** en total; se compara contra una **búsqueda aleatoria con idéntico presupuesto** como referencia justa. Además, el resultado se analiza críticamente: el AG converge 3,2 veces más rápido que la búsqueda aleatoria, pero su aptitud tiene sesgo de horizonte corto, defecto que identificamos y corregimos en la fase de refinamiento.
 
@@ -65,12 +65,8 @@ docs/       guía técnica, figuras del README
 ## Más información
 
 - **[docs/development.md](docs/development.md)** — guía técnica completa: instalación, reproducción de todos los resultados, opciones de entrenamiento, despliegue en Streamlit Cloud y ejecución en Kaggle/Colab.
-- El **informe completo (memoria)** acompaña esta entrega como documento aparte; el enunciado de la práctica está en [`bases-proyecto-optimizacionyheuristica.md`](bases-proyecto-optimizacionyheuristica.md).
+- El **informe completo (memoria)** acompaña esta entrega como documento aparte.
 
-## Autores
-
-**Javier Ruano Hernández** y **Alejandro Delgado Valera**
-Universidad de Las Palmas de Gran Canaria · Asignatura *Optimización y Heurística* · Curso 2026–2027 · Noviembre de 2026
 
 ## Licencia
 

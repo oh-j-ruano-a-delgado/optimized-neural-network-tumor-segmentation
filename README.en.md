@@ -29,7 +29,7 @@ Everything is validated with a *patient-wise* split on a public dataset of 3,064
 
 ## Demo
 
-> **Live demo link:** *coming soon — it will be published on Streamlit Community Cloud.*
+> **Live demo link:** [streamlit.app](https://unet-tumor-segmentation-jruano-adelgado.streamlit.app/)
 
 ## How it works
 
@@ -65,12 +65,8 @@ docs/       technical guide, README figures
 ## Further reading
 
 - **[docs/development.md](docs/development.md)** — full technical guide: installation, reproducing every result, training options, Streamlit Cloud deployment and Kaggle/Colab execution.
-- The **full report (memoria)** accompanies this submission as a separate document; the assignment it responds to is kept in [`bases-proyecto-optimizacionyheuristica.md`](bases-proyecto-optimizacionyheuristica.md).
+- The **full report (memoria)** accompanies this submission as a separate document.
 
-## Authors
-
-**Javier Ruano Hernández** and **Alejandro Delgado Valera**
-University of Las Palmas de Gran Canaria · Course *Optimization and Heuristics* · Academic year 2026–2027 · November 2026
 
 ## License
 
