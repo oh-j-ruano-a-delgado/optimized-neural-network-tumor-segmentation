@@ -65,7 +65,7 @@ docs/       guía técnica, figuras del README
 ## Más información
 
 - **[docs/development.md](docs/development.md)** — guía técnica completa: instalación, reproducción de todos los resultados, opciones de entrenamiento, despliegue en Streamlit Cloud y ejecución en Kaggle/Colab.
-- El **informe completo (memoria)** acompaña esta entrega como documento aparte.
+- El **informe completo (memoria)** acompaña esta entrega como documento aparte: [main.pdf](docs/report/main.pdf).
 
 
 ## Licencia

@@ -65,7 +65,7 @@ docs/       technical guide, README figures
 ## Further reading
 
 - **[docs/development.md](docs/development.md)** — full technical guide: installation, reproducing every result, training options, Streamlit Cloud deployment and Kaggle/Colab execution.
-- The **full report (memoria)** accompanies this submission as a separate document.
+- The **full report (memoria)** accompanies this submission as a separate document: [main.pdf](docs/report/main.pdf).
 
 
 ## License
