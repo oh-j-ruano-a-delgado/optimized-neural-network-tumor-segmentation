@@ -1,0 +1,188 @@
+\section{Nivel externo: metaoptimización con un algoritmo genético}\label{sec:ag}
+
+La \cref{sec:unet} ha mostrado que el algoritmo interno queda determinado por cuatro magnitudes que el descenso por gradiente no puede ajustar, y que con la configuración manual el descenso oscila sin que sea evidente cómo corregirlo. Esta sección aborda el problema externo de la \cref{eq:binivel} con un algoritmo genético implementado desde cero.
+
+\subsection{Caracterización del problema}\label{subsec:caracterizacion}
+
+La función $\vlambda \mapsto \DiceOp_{\mathrm{val}}(\vtheta^{\star}(\vlambda))$ reúne todas las propiedades que hacen inviables los métodos clásicos~\cite{feurer2019hpo}: es una \emph{caja negra} sin gradiente respecto a $\vlambda$; es \emph{costosa}, pues un entrenamiento de 100 épocas dura unos 98 minutos en GPU; es \emph{ruidosa}, porque depende de la inicialización y del orden de los minilotes; es \emph{mixta}, con variables continuas que abarcan varios órdenes de magnitud ($\eta$, $\lambda$) y discretas ordinales ($F$, $D$); y presenta \emph{interacciones}, ya que el valor óptimo de un hiperparámetro depende de los demás. La búsqueda en rejilla crece exponencialmente con la dimensión. Las metaheurísticas poblacionales, como los algoritmos genéticos~\cite{goldberg1989genetic} o la optimización por enjambre de partículas~\cite{kennedy1995pso}, concentran progresivamente la búsqueda en las regiones prometedoras sin requerir gradientes. Se eligió un AG porque admite variables mixtas mediante una codificación adecuada, su selección basada en el orden es robusta frente al ruido de la aptitud y su aplicación a hiperparámetros de redes profundas está bien establecida~\cite{young2015optimizing}.
+
+\paragraph{Por qué no búsqueda aleatoria.} La búsqueda aleatoria supera a la rejilla a igual presupuesto~\cite{bergstra2012random}, pero carece de memoria: lo aprendido en las evaluaciones previas no influye en dónde se evalúa a continuación. Con $n$ muestras uniformes, la probabilidad de alcanzar una región que ocupa una fracción $q$ del espacio es $P_n(q)=1-(1-q)^{n}$; con las $n=46$ evaluaciones de este trabajo, alcanza casi con seguridad el 5\,\% mejor del espacio ($P_{46}=0.91$), pero el 1\,\% mejor solo en el 37\,\% de los casos. Localizar una región buena es sencillo; refinarla no lo es. En el AG, la población actúa como memoria: la selección y el cruce \emph{explotan} las regiones prometedoras, y la mutación y la componente extrapolante del cruce mantienen la \emph{exploración}.
+
+\subsection{Espacio de búsqueda y codificación del cromosoma}\label{subsec:codificacion}
+
+Cada individuo se representa mediante un \emph{genotipo} real normalizado $\vu\in[0,1]^4$, que una función de decodificación $\varphi$ transforma en el \emph{fenotipo} $\vlambda=\varphi(\vu)=(\eta,\lambda,F,D)$ (\cref{tab:genes}). La codificación responde a tres decisiones de diseño:
+
+\begin{itemize}
+  \item \textbf{Escala logarítmica para los genes continuos.} La tasa de aprendizaje y el decaimiento actúan de forma multiplicativa. Con la decodificación $10^{a+(b-a)u}$, un gen uniforme explora por igual cada orden de magnitud y los operadores trabajan sobre el exponente.
+  \item \textbf{Intervalos ordenados para los genes categóricos.} El intervalo $[0,1]$ se divide en tres tramos de anchura $1/3$, asociados a los valores en orden creciente. Como las categorías son ordinales, los operadores aritméticos conservan su sentido: cruzar un individuo de 8 filtros con otro de 32 puede producir uno de 16. Un valor conocido, como los de la referencia, se codifica en el centro de su tramo.
+  \item \textbf{Redundancia controlada.} Las variaciones de $u_3$ o $u_4$ dentro de un tramo son mutaciones neutras: no cambian la red ni consumen presupuesto, gracias a la memoria del \cref{subsec:aptitud}.
+\end{itemize}
+
+El espacio abarca nueve arquitecturas, de 0.11 a 29 millones de parámetros, combinadas con un continuo bidimensional de configuraciones del optimizador.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Codificación del cromosoma. La decodificación de los genes continuos es logarítmica y la de los categóricos asigna intervalos de igual anchura a cada valor. Las dos últimas columnas muestran el fenotipo y, entre paréntesis, el gen de la configuración manual de referencia y de la mejor solución encontrada (\cref{subsec:resultados-ag}).}
+  \label{tab:genes}
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{clllll}
+    \toprule
+    \textbf{Gen} & \textbf{Hiperparámetro} & \textbf{Dominio} & \textbf{Decodificación} & \textbf{Referencia} & \textbf{Mejor (AG)} \\
+    \midrule
+    $u_1$ & Tasa de aprendizaje $\eta$ & $[10^{-4},10^{-2}]$ & $10^{-4+2u_1}$ & $10^{-3}$ (0.500) & $3.15\cdot10^{-4}$ (0.249) \\
+    $u_2$ & Decaimiento de pesos $\lambda$ & $[10^{-6},10^{-3}]$ & $10^{-6+3u_2}$ & $10^{-4}$ (0.667) & $1.91\cdot10^{-6}$ (0.094) \\
+    $u_3$ & Filtros base $F$ & $\{8,16,32\}$ & $(8,16,32)_{\lfloor 3u_3\rfloor}$ & 16 (0.500) & 16 (0.478) \\
+    $u_4$ & Profundidad $D$ & $\{3,4,5\}$ & $(3,4,5)_{\lfloor 3u_4\rfloor}$ & 4 (0.500) & 4 (0.520) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Función de aptitud}\label{subsec:aptitud}
+
+La aptitud de un genotipo es una aproximación de baja fidelidad del objetivo externo: $\aptitud(\vu)=\max_{t\in\{1,2,3\}} \DiceOp_{\mathrm{val}}\bigl(\vtheta_t(\varphi(\vu))\bigr)$, el mejor Dice de validación en tres épocas de entrenamiento con pérdida Dice-Focal y aumento básico, o $0$ si el entrenamiento diverge o agota la memoria (una penalización de muerte que ningún individuo llegó a recibir).
+
+Es de \textbf{baja fidelidad}: tres épocas equivalen a 753 iteraciones, y cada evaluación duró de media 178.5\,s, unas 33 veces menos que un entrenamiento de 100 épocas. Tomar el \textbf{máximo sobre las épocas}, y no el último valor, la hace robusta frente a la oscilación de una época concreta. Con \textbf{números aleatorios comunes} (cada evaluación restablece la semilla 42), dos individuos con la misma arquitectura parten de la misma inicialización y reciben los mismos minilotes, de modo que sus diferencias de aptitud reflejan los hiperparámetros y no el azar. Por último, una tabla de \textbf{memoización} evita reevaluar un fenotipo repetido. Esta aptitud premia las configuraciones que aprenden deprisa en las primeras épocas, que no tienen por qué ser las mejores tras un entrenamiento completo; el sesgo se analiza en el \cref{subsec:sesgo}.
+
+\subsection{Operadores genéticos}\label{subsec:operadores}
+
+\paragraph{Inicialización con siembra.} La población inicial de $N=10$ individuos contiene el genotipo de la configuración de referencia, $(0.500, 0.667, 0.500, 0.500)$, y nueve genotipos uniformes en $[0,1]^4$. Junto con el elitismo, la siembra garantiza que la solución final nunca sea peor, en aptitud, que la referencia.
+
+\paragraph{Selección por torneo.} Cada progenitor es el más apto de $k=3$ individuos tomados al azar; el de rango $r$ gana con probabilidad $\tbinom{N-r}{k-1}\big/\tbinom{N}{k}$, que vale 0.300 para el mejor y cero para los dos peores. La presión selectiva es moderada y, al depender solo del orden, robusta frente al ruido de la aptitud.
+
+\paragraph{Cruce BLX-$\alpha$.} Con probabilidad $p_c=0.8$, cada pareja de progenitores genera dos descendientes muestreando cada gen de forma uniforme en $[m_j-\alpha d_j,\, M_j+\alpha d_j]$, donde $m_j$ y $M_j$ son el mínimo y el máximo de los progenitores y $d_j=M_j-m_j$~\cite{eshelman1993realcoded}. Con $\alpha=0.5$, la mitad de la probabilidad cae entre los progenitores (explotación) y la otra mitad fuera (exploración por extrapolación), lo que evita la contracción sistemática de la población.
+
+\paragraph{Mutación gaussiana con reflexión.} Cada gen se perturba con probabilidad $p_m=0.25$ sumándole $\epsilon\sim\mathcal{N}(0,\sigma^2)$ con $\sigma=0.2$, que equivale a 0.4 órdenes de magnitud en $\eta$ y 0.6 en $\lambda$, y cambia el valor de $F$ o $D$ con probabilidad $\approx0.40$. Los valores que salen de $[0,1]$ se devuelven por reflexión, que, a diferencia del truncamiento, no acumula probabilidad en los extremos del dominio.
+
+\paragraph{Control de novedad y elitismo.} Si el fenotipo de un descendiente ya se ha evaluado o generado, se vuelve a mutar con $p_m=1$, con un máximo de 20 intentos: como una memoria tabú, garantiza que cada evaluación explore una configuración distinta. La nueva población está formada por el mejor individuo de la anterior ($e=1$), que no se reevalúa, y por nueve descendientes, de modo que la mejor aptitud es monótona no decreciente. Con $G=5$ generaciones, el presupuesto es de $N+(G-1)(N-e)=46$ entrenamientos. El \cref{alg:ag} resume el procedimiento completo.
+
+\clearpage
+
+\begin{algorithm}[htbp]
+  \caption{Algoritmo genético para la optimización de hiperparámetros.}
+  \label{alg:ag}
+  \DontPrintSemicolon
+  \KwIn{$N=10$, $G=5$, $e=1$, $k=3$, $p_c=0.8$, $\alpha=0.5$, $p_m=0.25$, $\sigma=0.2$; genotipo de referencia $\vu_{\mathrm{ref}}$; aptitud $\aptitud$; decodificación $\varphi$}
+  \KwOut{mejor genotipo encontrado $\vu^{\star}$}
+  $\mathcal{M} \leftarrow \emptyset$; \quad $P \leftarrow \{\vu_{\mathrm{ref}}\} \cup \{\vu_i \sim U[0,1]^4\}_{i=1}^{N-1}$\;
+  \For{$g \leftarrow 1$ \KwTo $G$}{
+    \ForEach{$\vu \in P$ sin aptitud asignada}{
+      \eIf{$\varphi(\vu) \in \mathrm{dom}(\mathcal{M})$}{
+        $f(\vu) \leftarrow \mathcal{M}[\varphi(\vu)]$\;
+      }{
+        $f(\vu) \leftarrow \aptitud(\vu)$ entrenando 3 épocas; \quad $\mathcal{M}[\varphi(\vu)] \leftarrow f(\vu)$\;
+      }
+    }
+    ordenar $P$ por aptitud decreciente y actualizar $\vu^{\star}$\;
+    \lIf{$g = G$}{\KwRet{$\vu^{\star}$}}
+    $Q \leftarrow$ los $e$ mejores individuos de $P$; \quad $\mathcal{R} \leftarrow \mathrm{dom}(\mathcal{M})$\;
+    \While{$|Q| < N$}{
+      $\vu^{a} \leftarrow \textsc{Torneo}(P,k)$; \quad $\vu^{b} \leftarrow \textsc{Torneo}(P,k)$\;
+      \eIf{$r \sim U[0,1]$ cumple $r < p_c$}{
+        $\vu^{1} \leftarrow \textsc{BLX}_{\alpha}(\vu^{a},\vu^{b})$; \quad $\vu^{2} \leftarrow \textsc{BLX}_{\alpha}(\vu^{a},\vu^{b})$\;
+      }{
+        $\vu^{1} \leftarrow \vu^{a}$; \quad $\vu^{2} \leftarrow \vu^{b}$\;
+      }
+      \ForEach{$\vu \in \{\vu^{1},\vu^{2}\}$}{
+        $\vu \leftarrow \textsc{Mutación}(\vu, p_m, \sigma)$\;
+        \While{$\varphi(\vu) \in \mathcal{R}$ y no se hayan agotado 20 intentos}{
+          $\vu \leftarrow \textsc{Mutación}(\vu, 1, \sigma)$\;
+        }
+        $\mathcal{R} \leftarrow \mathcal{R} \cup \{\varphi(\vu)\}$\;
+        \lIf{$|Q| < N$}{$Q \leftarrow Q \cup \{\vu\}$}
+      }
+    }
+    $P \leftarrow Q$\;
+  }
+\end{algorithm}
+
+
+\subsection{Resultados de la búsqueda}\label{subsec:resultados-ag}
+
+La búsqueda completó las 46 evaluaciones en 2\,h 17\,min de GPU. La \cref{tab:generaciones} resume la evolución de la población.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Evolución de la población por generación: mejor aptitud y aptitud media (incluido el élite), evaluaciones acumuladas (Eval.), individuos (de 10) con $F=16$ y con $D=4$, y medianas de los genes continuos.}
+  \label{tab:generaciones}
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{cccccccc}
+    \toprule
+    \textbf{Generación} & \textbf{Mejor} & \textbf{Media} & \textbf{Eval.} & $\bm{F=16}$ & $\bm{D=4}$ & \textbf{Mediana de} $\bm{\eta}$ & \textbf{Mediana de} $\bm{\lambda}$ \\
+    \midrule
+    1 & 0.4409 & 0.2464 & 10 & 4 & 4 & $1.54\cdot10^{-3}$ & $6.17\cdot10^{-5}$ \\
+    2 & 0.4409 & 0.2983 & 19 & 4 & 5 & $6.75\cdot10^{-4}$ & $1.00\cdot10^{-4}$ \\
+    3 & \textbf{0.5085} & 0.3327 & 28 & 7 & 8 & $7.63\cdot10^{-4}$ & $3.31\cdot10^{-6}$ \\
+    4 & \textbf{0.5085} & 0.3560 & 37 & 7 & 8 & $5.32\cdot10^{-4}$ & $2.38\cdot10^{-6}$ \\
+    5 & \textbf{0.5085} & 0.3370 & 46 & 6 & 7 & $3.84\cdot10^{-4}$ & $3.98\cdot10^{-6}$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Mejor solución.} Las dos primeras generaciones no superan a la referencia sembrada (0.4409), aunque la aptitud media mejora. En la tercera surge la mejor solución, con aptitud 0.5085: $\eta=3.15\cdot10^{-4}$, $\lambda=1.91\cdot10^{-6}$, $F=16$ y $D=4$, una mejora de $+0.0676$ (un 15.3\,\% relativo). El AG conservó la arquitectura de la referencia, redujo la tasa de aprendizaje 3.2 veces y, en la práctica, desactivó la regularización $L_2$. Esta elección es coherente con el \cref{subsec:adam}: con Adam, la penalización acoplada es débil, y en tres épocas cualquier regularización solo puede ralentizar el ajuste.
+
+\paragraph{Convergencia y asignación del presupuesto.} La población se concentra en la región de la mejor solución: los individuos con $F=16$ pasan de 4 a 7 de cada 10, los de $D=4$ de 4 a 8, y la mediana de $\lambda$ cae casi dos órdenes de magnitud. Todas las aptitudes superiores a 0.40 tienen $\eta\in[3\cdot10^{-4},\,1.5\cdot10^{-3}]$, y $F=16$ y $D=4$ obtienen la mayor aptitud media de sus genes (0.328 y 0.326). Con muestreo uniforme cabría esperar unas 5 de las 46 evaluaciones en la arquitectura $F=16$, $D=4$, unas 16 en esa banda de $\eta$ y menos de 2 en ambas a la vez; el AG dedicó 18, 23 y 9, respectivamente. Es la ventaja que motivó su elección frente a la búsqueda aleatoria: la memoria de la población invierte el presupuesto en la región prometedora.
+
+\subsection{Validación: entrenamiento completo y conjunto de prueba}\label{subsec:validacion-ag}
+
+La aptitud es una aproximación de tres épocas medida sobre el mismo conjunto de validación con el que se eligió la mejor de 46 configuraciones, de modo que su mejora es optimista por construcción. Para validarla, la configuración del AG (ejecución A) se reentrenó durante 100 épocas con un procedimiento idéntico al de la referencia (40 épocas), salvo en los hiperparámetros.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+        informe,
+        height=5.8cm,
+        xlabel={Época},
+        ylabel={Dice medio de validación},
+        xmin=0, xmax=100, ymin=0.1, ymax=0.9,
+        legend pos=south east,
+      ]
+      \addplot[cazul!35, line width=0.5pt, forget plot] table[x=epoca, y=dice_val, col sep=comma] {data/historial_base.csv};
+      \addplot[cbermellon!35, line width=0.5pt, forget plot] table[x=epoca, y=dice_val, col sep=comma] {data/historial_A.csv};
+      \addplot[cazul, line width=1.3pt] table[x=epoca, y=dice_val_suave, col sep=comma] {data/historial_base.csv};
+      \addlegendentry{Referencia manual}
+      \addplot[cbermellon, line width=1.3pt] table[x=epoca, y=dice_val_suave, col sep=comma] {data/historial_A.csv};
+      \addlegendentry{Configuración del AG (A)}
+      \addplot[black!70, densely dashed, line width=0.8pt, domain=0:100, samples=2, forget plot] {0.6538};
+      \addplot[only marks, mark=*, mark size=2.4pt, cazul, forget plot] coordinates {(35,0.6538)};
+      \addplot[only marks, mark=*, mark size=2.4pt, cbermellon, forget plot] coordinates {(10,0.6663) (64,0.7702)};
+      \draw[black!60, line width=0.4pt] (axis cs:35,0.6538) -- (axis cs:43,0.585);
+      \node[font=\scriptsize, anchor=north west, align=left, fill=white, inner sep=1.5pt] at (axis cs:43,0.59) {mejor de la referencia:\\0.6538 (época 35, 32 min)};
+      \draw[black!60, line width=0.4pt] (axis cs:10,0.6663) -- (axis cs:14,0.78);
+      \node[font=\scriptsize, anchor=south west, align=left, fill=white, inner sep=1.5pt] at (axis cs:12,0.78) {A supera ese valor en la época 10 (10 min)};
+      \node[font=\scriptsize, anchor=south west, fill=white, inner sep=1.5pt] at (axis cs:61,0.785) {mejor de A: 0.7702 (época 64)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Dice medio de validación por época. Las líneas finas muestran los valores por época y las gruesas, la media móvil centrada de 5 épocas.}
+  \label{fig:validacion-ag}
+\end{figure}
+
+\paragraph{Velocidad de convergencia.} A supera el mejor Dice de validación de la referencia (0.6538, época 35, 32 minutos) en la época 10, tras 10 minutos: una convergencia 3.2 veces más rápida (\cref{fig:validacion-ag}). Con el mismo presupuesto de 40 épocas alcanza 0.7354, y su mejor valor, 0.7702, en la época 64. Su pérdida de entrenamiento también desciende más deprisa (0.188 frente a 0.282 en la época 10): un paso menor con un decaimiento casi nulo produce un descenso más rápido, lo que respalda que el paso de la referencia era excesivo, aunque con una ejecución de cada configuración no es posible separar ese efecto del de la penalización $L_2$.
+
+\paragraph{Precisión en prueba.} En los 592 cortes de prueba (\cref{tab:prueba-ag}), el Dice medio pasa de 0.6905 a 0.7760 ($+0.0855$) y el IoU medio de 0.5519 a 0.6470. La mejora se concentra en el glioma, la clase más difícil ($+0.178$ de Dice), mientras que el tumor hipofisario apenas cambia.
+
+\clearpage
+
+\begin{table}[htbp]
+  \centering
+  \caption{Comparación en el conjunto de prueba (592 cortes, 46 pacientes) de la configuración manual de referencia y la configuración del algoritmo genético.}
+  \label{tab:prueba-ag}
+  \begin{tabular}{lrrrrrr}
+    \toprule
+    & \multicolumn{3}{c}{\textbf{Dice}} & \multicolumn{3}{c}{\textbf{IoU}} \\
+    \cmidrule(lr){2-4}\cmidrule(lr){5-7}
+    \textbf{Región} & \textbf{Referencia} & \textbf{AG (A)} & $\Delta$ & \textbf{Referencia} & \textbf{AG (A)} & $\Delta$ \\
+    \midrule
+    Meningioma   & 0.8258 & \textbf{0.8899} & $+0.0641$ & 0.7033 & \textbf{0.8017} & $+0.0984$ \\
+    Glioma       & 0.4471 & \textbf{0.6254} & $+0.1784$ & 0.2879 & \textbf{0.4550} & $+0.1671$ \\
+    Hipofisario  & 0.7985 & \textbf{0.8126} & $+0.0141$ & 0.6646 & \textbf{0.6844} & $+0.0198$ \\
+    \midrule
+    Media (3 clases) & 0.6905 & \textbf{0.7760} & $+0.0855$ & 0.5519 & \textbf{0.6470} & $+0.0951$ \\
+    Tumor completo   & 0.6230 & \textbf{0.7233} & $+0.1003$ & 0.4525 & \textbf{0.5666} & $+0.1141$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Lectura crítica.} La mejora en prueba es menor que en validación ($+0.1164$), por el optimismo de seleccionar sobre ese mismo conjunto. Los presupuestos de entrenamiento difieren, pero la comparación con igual presupuesto en validación (0.7354 frente a 0.6538) indica que la mayor parte de la ganancia procede de los hiperparámetros. Por último, el AG solo se ha comparado con una configuración manual: se implementó una búsqueda aleatoria con el mismo espacio, la misma aptitud y el mismo presupuesto, pero sus resultados no están disponibles, de modo que esa comparación queda como trabajo futuro.

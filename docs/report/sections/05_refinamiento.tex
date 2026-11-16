@@ -1,0 +1,121 @@
+\section{Superando los límites de la heurística: análisis y refinamiento}\label{sec:refinamiento}
+
+La solución del AG está condicionada por la aptitud de tres épocas y por un cromosoma que deja fuera la pérdida, el aumento de datos y la programación de la tasa de aprendizaje. Esta sección supera esas limitaciones con un ciclo de diagnóstico, hipótesis y experimentación controlada (Fases 5 y 6), conservando siempre los valores de $\eta$ y $\lambda$ del AG.
+
+\subsection{Diagnóstico de la solución del algoritmo genético}\label{subsec:diagnostico}
+
+El glioma está \emph{limitado por la sensibilidad} (\cref{tab:diagnostico-A}): el modelo A omite el 44.2\,\% de sus píxeles, que clasifica como fondo, y solo confunde el 1.4\,\% con otro tipo de tumor, con una razón FN/FP de 2.25. En el 14.4\,\% de los cortes de glioma no predice ningún píxel tumoral, y en los gliomas pequeños (tercio inferior por área) su Dice medio por corte es de solo 0.380, frente a 0.672 en los grandes. El problema no es reconocer el tipo de tumor, sino delimitar sus bordes difusos. Según el \cref{subsec:perdidas}, la corrección natural es una pérdida que encarezca los falsos negativos: la Focal Tversky con $\alpha=0.7>\beta=0.3$.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Diagnóstico por clase del modelo A (configuración del AG) en validación.}
+  \label{tab:diagnostico-A}
+  \small
+  \begin{tabular}{lcccccc}
+    \toprule
+    \textbf{Clase} & \textbf{Precisión} & \textbf{Sensibilidad} & \textbf{Dice} & \textbf{FN/FP} & \textbf{Omitido} & \textbf{Confundido} \\
+    & & & & & \textbf{como fondo} & \textbf{de tipo} \\
+    \midrule
+    Meningioma  & 0.907 & 0.821 & 0.862 & 2.13 & 11.6\,\% & 6.3\,\% \\
+    Glioma      & 0.728 & 0.544 & 0.623 & 2.25 & 44.2\,\% & 1.4\,\% \\
+    Hipofisario & 0.808 & 0.844 & 0.826 & 0.78 & 10.8\,\% & 4.8\,\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{El sesgo de horizonte corto de la función de aptitud}\label{subsec:sesgo}
+
+Al medir el Dice tras tres épocas, la aptitud premia la velocidad inicial de aprendizaje y no la calidad final, un fenómeno conocido como \emph{sesgo de horizonte corto} en la metaoptimización~\cite{wu2018shorthorizon}. Sus efectos son visibles en la búsqueda:
+
+\begin{itemize}
+  \item \textbf{Penaliza la capacidad.} La aptitud media de los individuos de 32 filtros (0.286) es menor que la de los de 16 (0.328). El individuo de 32 filtros con casi el mismo $(\eta,\lambda)$ que la solución ganadora obtiene 0.4405 frente a 0.5085: en tres épocas, una red cuatro veces mayor aún no ha avanzado tanto en su descenso, lo que no implica que su punto final vaya a ser peor.
+  \item \textbf{Es ciega a la programación de la tasa de aprendizaje.} Con \textit{cosine annealing} sobre $T=150$ épocas, la tasa tras tres épocas es el 99.9\,\% de la inicial (\cref{eq:coseno}): cualquier beneficio de reducir el paso al final del entrenamiento es invisible para la aptitud.
+  \item \textbf{Penaliza la regularización.} El aumento de datos y las pérdidas que reequilibran precisión y sensibilidad ralentizan el ajuste inicial aunque mejoren la generalización; además, ninguno formaba parte del cromosoma.
+\end{itemize}
+
+De este análisis se derivan cuatro hipótesis: (H1) la pérdida Focal Tversky mejora la sensibilidad en el glioma; (H2) el aumento de datos mejora la generalización; (H3) la tasa de aprendizaje constante provoca oscilaciones que convierten la selección del punto de control en un sorteo; y (H4) la capacidad de 16 filtros, elegida bajo el sesgo de la aptitud, limita el rendimiento final.
+
+\subsection{Fase 5: diseño factorial de la pérdida y el aumento de datos}\label{subsec:fase5}
+
+Para contrastar H1 y H2 se entrenó un diseño factorial $2\times2$ (pérdida Dice-Focal o Focal Tversky-Focal, aumento básico o avanzado; ejecuciones A, B, C y D) y dos ejecuciones que aíslan los bloques espacial (S) y de intensidad (I) del aumento avanzado (\cref{tab:fase5}).
+
+\begin{table}[htbp]
+  \centering
+  \caption{Fase 5: resultados en validación (mejor punto de control). DF: Dice-Focal; FT: Focal Tversky-Focal con $\alpha=0.7$, $\beta=0.3$, $\gamma_T=4/3$. \emph{Peq.}: Dice medio por corte de los gliomas pequeños. \emph{Omit.}: porcentaje de cortes de glioma sin ningún píxel tumoral predicho.}
+  \label{tab:fase5}
+  \small
+  \setlength{\tabcolsep}{3.4pt}
+  \begin{tabular}{llcccccccc}
+    \toprule
+    & & \multicolumn{4}{c}{\textbf{Dice}} & \multicolumn{4}{c}{\textbf{Glioma}} \\
+    \cmidrule(lr){3-6}\cmidrule(lr){7-10}
+    \textbf{Ejec.} & \textbf{Aumento y pérdida} & \textbf{Medio} & \textbf{Men.} & \textbf{Gli.} & \textbf{Hip.} & \textbf{Sens.} & \textbf{FN/FP} & \textbf{Peq.} & \textbf{Omit.} \\
+    \midrule
+    A & básico, DF            & 0.7702 & \textbf{0.862} & 0.623 & 0.826 & 0.544 & 2.25 & 0.380 & 14.4\,\% \\
+    B & avanzado, DF          & 0.7595 & 0.852 & 0.629 & 0.797 & 0.584 & 1.54 & 0.390 & 14.4\,\% \\
+    C & básico, FT            & 0.7672 & 0.856 & 0.622 & 0.824 & 0.582 & 1.44 & 0.312 & 12.2\,\% \\
+    D & avanzado, FT          & 0.7675 & 0.845 & \textbf{0.683} & 0.774 & 0.662 & 1.22 & \textbf{0.426} & 10.1\,\% \\
+    \midrule
+    S & espacial avanzado, FT & \textbf{0.7751} & 0.858 & 0.640 & \textbf{0.828} & \textbf{0.694} & 0.64 & 0.404 & \textbf{8.0\,\%} \\
+    I & intensidad, FT        & 0.7454 & 0.830 & 0.618 & 0.788 & 0.568 & 1.60 & 0.360 & 17.0\,\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{enumerate}
+  \item \textbf{La pérdida Focal Tversky desplaza el equilibrio hacia la sensibilidad, como predice el \cref{subsec:perdidas} (H1).} Por sí sola (C frente a A), eleva la sensibilidad del glioma en 0.038 y reduce su razón FN/FP de 2.25 a 1.44, pero su precisión cae en 0.061 y su Dice no varía.
+  \item \textbf{El aumento espacial es el componente útil del aumento avanzado (H2).} Frente a C, la ejecución S eleva la sensibilidad del glioma de 0.582 a 0.694 y el Dice de los gliomas pequeños de 0.312 a 0.404, y reduce los cortes de glioma omitidos del 12.2\,\% al 8.0\,\%. El bloque de intensidad, en cambio, es perjudicial: I omite más gliomas (17.0\,\%) y confunde meningiomas con tumores hipofisarios.
+  \item \textbf{Las diferencias en Dice medio están dentro del ruido.} S supera a A en solo $+0.005$, mientras que el Dice de validación oscila entre 0.02 y 0.03 de una época a la siguiente. Siete configuraciones distintas alcanzan su mejor valor entre 0.744 y 0.775: esta meseta apunta a H3 y H4.
+  \item \textbf{Con aumento espacial, $\alpha=0.7$ sobrecorrige.} En S, la razón FN/FP del glioma cae a 0.64 y su precisión a 0.593: el modelo pasa a estar limitado por la precisión, lo que lleva a reducir el peso de los falsos negativos a $\alpha=0.6$, $\beta=0.4$.
+\end{enumerate}
+
+\subsection{Fase 6: capacidad y estabilización del descenso}\label{subsec:fase6}
+
+La ejecución E combina las tres correcciones derivadas del análisis: 32 filtros base (7.24 millones de parámetros), \textit{cosine annealing} sobre $T=150$ épocas y pesos Focal Tversky recalibrados ($\alpha=0.6$, $\beta=0.4$), con aumento espacial avanzado. Como E modifica tres factores a la vez respecto a S, se entrenó también un control, E16, idéntico salvo por tener 16 filtros: E frente a E16 aísla la capacidad, y E16 frente a S el \textit{cosine annealing} junto con los nuevos pesos.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{training_curves.pdf}
+  \caption{Dinámica del entrenamiento con tasa de aprendizaje constante (A) y con \textit{cosine annealing} (E). Arriba: pérdidas de entrenamiento y de validación (cada ejecución usa una pérdida distinta, por lo que sus valores no son comparables entre columnas). Centro: Dice medio de validación por época (trazo fino) y su media móvil centrada de 5 épocas (trazo grueso). Abajo: tasa de aprendizaje aplicada. La línea de puntos marca el mejor punto de control y la banda sombreada, las épocas posteriores, que no lo mejoran.}
+  \label{fig:coseno}
+\end{figure}
+
+La \cref{fig:coseno} y las métricas de validación de las cuatro ejecuciones (A, S, E16 y E) confirman H3 y H4, con matices:
+
+\begin{enumerate}
+  \item \textbf{El \textit{cosine annealing} elimina las oscilaciones (H3).} En las 30 últimas épocas, el cambio medio del Dice de validación entre épocas consecutivas cae de 0.022--0.030 (A y S) a 0.003 (E16 y E), y su desviación típica en las 20 últimas, de 0.016--0.019 a 0.002. La última época pasa a ser un modelo utilizable (0.749 en E) y la selección del punto de control deja de ser un sorteo, como predice el \cref{subsec:programacion}.
+  \item \textbf{La capacidad aporta una mejora pequeña pero consistente (H4).} En las 30 épocas finales, E supera a E16 en $+0.009$ de Dice medio, sobre todo en el glioma ($+0.036$) y el meningioma ($+0.025$), aunque el tumor hipofisario retrocede ($-0.035$). En el mejor punto de control, en cambio, E queda por debajo de E16 (0.7612 frente a 0.7693), porque ambos picos caen en la fase intermedia, todavía ruidosa, del \textit{cosine annealing}.
+  \item \textbf{Los pesos $\alpha=0.6$, $\beta=0.4$ equilibran el glioma, pero solo con 32 filtros.} En E, la precisión del glioma sube de 0.593 a 0.702 respecto a S, su sensibilidad apenas varía (de 0.694 a 0.679) y la razón FN/FP queda en 1.11. Con los mismos pesos, E16 vuelve al perfil inicial (FN/FP de 2.10): el equilibrio depende de la combinación de pérdida y capacidad, una interacción entre hiperparámetros como la anticipada en el \cref{subsec:caracterizacion}.
+\end{enumerate}
+
+\paragraph{Resultado en el conjunto de prueba.} La comparación planificada de A frente a E (\cref{tab:prueba-E}) muestra una mejora de $+0.0412$ en Dice medio, hasta \textbf{0.8175}, el mejor resultado del proyecto con una red entrenada desde cero. La mejora se concentra de nuevo en el glioma ($+0.0876$). Respecto a la referencia manual, la ganancia total es de $+0.127$ (un 18.4\,\% relativo), y el Dice del glioma pasa de 0.447 a 0.714. La \cref{fig:segmentacion} muestra un caso típico: el corte de glioma de prueba cuyo Dice con E (0.754) está más cerca de la mediana de E sobre los 300 cortes de glioma (0.753). En ese corte, A no detecta el tumor (Dice 0.00), uno de los gliomas omitidos por completo descritos en el \cref{subsec:diagnostico}, mientras que E recupera el 84\,\% de sus píxeles a costa de algunos falsos positivos junto al borde de la lesión.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Conjunto de prueba (592 cortes): referencia manual, configuración del AG (A) y modelo refinado (E). La evaluación de A se repitió en esta fase con un resultado prácticamente idéntico al de la \cref{tab:prueba-ag} (0.7763 frente a 0.7760).}
+  \label{tab:prueba-E}
+  \begin{tabular}{lcccc}
+    \toprule
+    \textbf{Región} & \textbf{Referencia} & \textbf{AG (A)} & \textbf{Refinado (E)} & \textbf{E $-$ A} \\
+    \midrule
+    Dice meningioma  & 0.8258 & 0.8901 & \textbf{0.8935} & $+0.0034$ \\
+    Dice glioma      & 0.4471 & 0.6259 & \textbf{0.7135} & $+0.0876$ \\
+    Dice hipofisario & 0.7985 & 0.8129 & \textbf{0.8457} & $+0.0328$ \\
+    \midrule
+    \textbf{Dice medio} & 0.6905 & 0.7763 & \textbf{0.8175} & $+0.0412$ \\
+    IoU medio        & 0.5519 & 0.6474 & \textbf{0.6982} & $+0.0508$ \\
+    Dice tumor completo & 0.6230 & 0.7237 & \textbf{0.7762} & $+0.0525$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\clearpage
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{segmentation_comparison.pdf}
+  \caption{Segmentación de un corte de glioma del conjunto de prueba (paciente MR049453B). De izquierda a derecha: imagen preprocesada, máscara de los radiólogos y predicciones de los modelos A y E superpuestas al contorno experto, con el Dice del glioma en ese corte.}
+  \label{fig:segmentacion}
+\end{figure}
+
+\paragraph{Discrepancia entre validación y prueba.} En validación, E queda por debajo de A (0.7612 frente a 0.7702); en prueba, claramente por encima. Solo la mejora del glioma se replica en ambos conjuntos ($+0.068$ y $+0.088$), lo que la convierte en el efecto más creíble. Un conjunto de validación de 468 cortes no permite ordenar modelos con una resolución de $\pm0.01$--$0.02$, una limitación que afecta también a la aptitud del AG.

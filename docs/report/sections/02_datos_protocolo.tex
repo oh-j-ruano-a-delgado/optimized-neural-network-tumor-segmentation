@@ -1,0 +1,42 @@
+\section{Datos y protocolo experimental}\label{sec:datos}
+
+\subsection{Conjunto de datos y partición por paciente}\label{subsec:dataset}
+
+Se emplea el conjunto público de Figshare~\cite{cheng2017figshare}: 3064 cortes de RM con contraste de 233 pacientes, de los que 708 son de meningioma (82 pacientes), 1426 de glioma (89) y 930 de tumor hipofisario (62). Cada registro incluye una imagen de 16 bits y $512\times512$ píxeles (salvo 15 cortes de $256\times256$), el tipo de tumor, el identificador del paciente y una máscara binaria de la lesión delineada por radiólogos. Para el problema multiclase, cada píxel de la máscara recibe la etiqueta de su clase ($1$, $2$ o $3$) y el resto la de fondo ($0$).
+
+\label{subsec:particion}Los cortes adyacentes de un mismo paciente son casi idénticos, de modo que una partición aleatoria por corte filtraría información entre subconjuntos e inflaría las métricas. Todas las particiones se realizan, por tanto, \emph{por paciente}, estratificadas por tipo de tumor y con semilla fija: se reserva el 20\,\% de los pacientes de cada clase para prueba y, de los restantes, otro 20\,\% para validación. Resultan 150 pacientes (2004 cortes) de entrenamiento, 37 (468) de validación y 46 (592) de prueba (\cref{fig:particion}). El conjunto de prueba no interviene en el entrenamiento, en la selección de puntos de control ni en la búsqueda del AG. El de validación mide la aptitud del AG, selecciona el mejor punto de control de cada entrenamiento y sirve de base a los diagnósticos de error.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{dataset_split.pdf}
+  \caption{Composición del conjunto de datos. Izquierda: cortes por tipo de tumor y subconjunto. Derecha: fracción media del área del corte que ocupa el tumor en las imágenes originales; el resto de los píxeles, el 98.3\,\% de media, es fondo.}
+  \label{fig:particion}
+\end{figure}
+
+\subsection{Preprocesamiento y aumento de datos}\label{subsec:preprocesamiento}
+
+Cada par imagen-máscara se recorta a la caja que engloba la cabeza y la lesión (umbralización tras un suavizado gaussiano y una apertura morfológica, con un margen de 4 píxeles), se redimensiona a $256\times256$ píxeles (interpolación por área para la imagen y por vecino más próximo para la máscara) y se normaliza al intervalo $[0,1]$ tras recortar las intensidades a los percentiles 0.5 y 99.5.
+
+\label{subsec:aumento}El aumento de datos actúa como regularizador del problema interno. Se implementaron con Albumentations tres bloques de transformaciones que preservan la etiqueta:
+
+\begin{itemize}
+  \item \textbf{Espacial básico}: volteos horizontal y vertical ($p=0.5$) y rotación de hasta $\pm15^\circ$.
+  \item \textbf{Espacial avanzado}: volteo horizontal; transformación afín (rotación de $\pm15^\circ$, escala entre 0.9 y 1.1 y traslación de $\pm6\,\%$, $p=0.7$); y, con $p=0.3$, una deformación elástica o una distorsión de rejilla. Se suprime el volteo vertical, que en los cortes sagitales y coronales genera anatomía inexistente.
+  \item \textbf{Intensidad}: brillo y contraste ($\pm0.15$), corrección gamma (0.8--1.2) y ruido gaussiano, tras la normalización.
+\end{itemize}
+
+Su combinación forma un diseño factorial $2\times2$ con cuatro preajustes: básico (\texttt{basic}), espacial avanzado (\texttt{advanced\_spatial}), básico con intensidad (\texttt{advanced\_intensity}) y avanzado completo (\texttt{advanced}).
+
+\subsection{Métricas de evaluación}\label{subsec:metricas}
+
+Sean $P_c$ y $G_c$ los conjuntos de píxeles predichos y reales de la clase $c$, acumulados sobre \emph{todo} el conjunto de evaluación. Las métricas principales son el coeficiente Dice y el índice de Jaccard (IoU):
+\begin{equation}\label{eq:dice}
+  \DiceOp_c = \frac{2\,|P_c \cap G_c|}{|P_c| + |G_c|},
+  \qquad
+  \IoUOp_c = \frac{|P_c \cap G_c|}{|P_c \cup G_c|}.
+\end{equation}
+El \emph{Dice medio} promedia las tres clases tumorales, excluido el fondo. Como métricas complementarias se usan el Dice de \emph{tumor completo} (lesión frente a fondo), la precisión, la sensibilidad, la razón entre falsos negativos y falsos positivos (FN/FP) y el porcentaje de píxeles tumorales clasificados como fondo. En la comparación final, la incertidumbre se cuantifica mediante \emph{bootstrap} pareado por paciente, con 10\,000 remuestreos estratificados de los 46 pacientes de prueba.
+
+\subsection{Protocolo experimental}\label{subsec:protocolo}
+
+Todos los entrenamientos se ejecutaron en GPU (Kaggle) con PyTorch, precisión mixta, lotes de 8 imágenes y semilla 42, conservando el punto de control con mayor Dice medio de validación. El proyecto avanzó en fases: configuración manual de referencia (Fase 2), búsqueda con el AG (Fase 3) y su validación (Fase 4), refinamiento (Fases 5 y 6) y transferencia de aprendizaje (Fase 7). El conjunto de prueba se reservó para tres comparaciones planificadas de antemano, una por cada transición entre etapas. La \cref{app:configuraciones} recoge la configuración completa de todas las ejecuciones.

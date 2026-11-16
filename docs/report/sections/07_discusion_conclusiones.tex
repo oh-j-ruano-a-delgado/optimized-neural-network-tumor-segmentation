@@ -1,0 +1,74 @@
+\section{Discusión y conclusiones}\label{sec:discusion}
+
+\subsection{Dos niveles de optimización complementarios}\label{subsec:dos-niveles}
+
+El trabajo ha resuelto dos problemas de optimización de naturaleza opuesta. El interno tiene millones de variables y un gradiente exacto y barato, que un método de descenso local como Adam aprovecha eficazmente. El externo tiene cuatro variables, carece de gradiente y cada evaluación cuesta minutos de entrenamiento, de modo que requiere una búsqueda global y poblacional. Ninguno de los dos métodos serviría para el problema del otro: un algoritmo genético no podría ajustar millones de pesos, y el descenso por gradiente no puede derivar el Dice de validación respecto a la profundidad de la red. Además, los dos niveles están acoplados en ambos sentidos. Hacia abajo, los hiperparámetros del AG determinan la trayectoria del descenso: con la misma red y la misma pérdida, la configuración evolucionada desciende más deprisa y llega más lejos (\cref{fig:validacion-ag}). Hacia arriba, como la aptitud trunca el entrenamiento a tres épocas, el AG solo percibe la fase inicial de esa trayectoria; de ahí su sesgo hacia redes pequeñas y su ceguera ante la programación de la tasa de aprendizaje.
+
+\subsection{Contribución de cada etapa}\label{subsec:contribucion}
+
+La \cref{fig:prueba-final} resume la evolución del rendimiento en el conjunto de prueba. El recorrido equivale a una búsqueda híbrida, análoga a un algoritmo memético: el AG realizó una exploración global, barata y automática, y encontró una buena cuenca, cuyos valores de $\eta$ y $\lambda$ se mantuvieron hasta el modelo final; el refinamiento actuó después como una búsqueda local guiada por diagnóstico, en dimensiones que el cromosoma no contemplaba. Sobre una mejora total de 0.1345 en Dice medio respecto a la referencia, la metaoptimización aporta $+0.0858$ (el 63.8\,\%), el refinamiento $+0.0412$ (el 30.6\,\%) y la transferencia de aprendizaje $+0.0075$ (el 5.6\,\%, no significativo): el AG es, con diferencia, la etapa que más aporta.
+
+\begin{figure}[htbp]
+  \centering
+  \definecolor{pbase}{HTML}{999999} % Gris medio
+\definecolor{pmodA}{HTML}{56B4E9} % Azul cielo
+\definecolor{pmodE}{HTML}{009E73} % Verde azulado
+\definecolor{pmodF}{HTML}{E69F00} % Ámbar dorado
+  \begin{tikzpicture}
+    \begin{axis}[
+        informe,
+        ybar,
+        height=5.6cm,
+        bar width=9pt,
+        enlarge x limits=0.15,
+        ymin=0, ymax=1.0,
+        ylabel={Dice en el conjunto de prueba},
+        symbolic x coords={Meningioma,Glioma,Hipofisario,Media},
+        xtick=data,
+        xticklabel style={font=\small},
+        legend style={at={(0.5,1.03)}, anchor=south, /tikz/every even column/.append style={column sep=8pt}},
+        legend columns=4,
+        grid=major,
+        xmajorgrids=false,
+      ]
+      \addplot[fill=pbase!80, draw=pbase!80!black] coordinates {(Meningioma,0.8258) (Glioma,0.4471) (Hipofisario,0.7985) (Media,0.6905)};
+      \addlegendentry{Referencia manual}
+      \addplot[fill=pmodA!85, draw=pmodA!80!black] coordinates {(Meningioma,0.8901) (Glioma,0.6259) (Hipofisario,0.8129) (Media,0.7763)};
+      \addlegendentry{AG (A)}
+      \addplot[fill=pmodE!85, draw=pmodE!80!black] coordinates {(Meningioma,0.8935) (Glioma,0.7135) (Hipofisario,0.8457) (Media,0.8175)};
+      \addlegendentry{Refinado (E)}
+      \addplot[fill=pmodF!85, draw=pmodF!80!black] coordinates {(Meningioma,0.9221) (Glioma,0.6855) (Hipofisario,0.8672) (Media,0.8250)};
+      \addlegendentry{ResNet34 (F)}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Dice por clase y medio en el conjunto de prueba para la configuración manual de referencia y los tres modelos principales del proyecto.}
+  \label{fig:prueba-final}
+\end{figure}
+
+El glioma sigue siendo la clase limitante: el objetivo orientativo de un Dice medio de 0.85 no se alcanzó (solo el 3.9\,\% de los remuestreos \emph{bootstrap} del mejor modelo llegan a ese valor) y habría exigido un Dice de 0.76 en el glioma.
+
+\subsection{Limitaciones y trabajo futuro}\label{subsec:amenazas}
+
+Las conclusiones deben leerse con cuatro limitaciones. Cada configuración se entrenó, y el AG se ejecutó, \textbf{una sola vez}, sin estimar la varianza entre entrenamientos. Los \textbf{conjuntos de evaluación} imponen su propia incertidumbre: el de prueba se usó en tres comparaciones sucesivas, y la resolución limitada del de validación afecta a la selección de puntos de control y a la aptitud. La \textbf{búsqueda} fue limitada (46 evaluaciones y 10 individuos) y solo se ha comparado con la configuración manual. Por último, el \textbf{alcance de los datos} se reduce a cortes bidimensionales de una única secuencia y un único conjunto público. De ellas se derivan las líneas de trabajo futuro:
+\label{subsec:futuro}
+
+\begin{enumerate}
+  \item \textbf{Referencias y repeticiones:} completar la búsqueda aleatoria con igual presupuesto, repetir el AG con varias semillas y compararlo con la optimización por enjambre de partículas~\cite{kennedy1995pso}.
+  \item \textbf{Aptitud multifidelidad:} prolongar el entrenamiento solo de los individuos más prometedores, al estilo de Hyperband, para mitigar el sesgo de horizonte corto sin multiplicar el coste.
+  \item \textbf{Cromosoma ampliado y multiobjetivo:} incorporar el aumento de datos, los pesos de la pérdida y la programación de la tasa de aprendizaje, y buscar el frente de Pareto entre precisión, tamaño y tiempo de entrenamiento con NSGA-II.
+  \item \textbf{Evaluación y glioma:} sustituir la partición fija por validación cruzada por paciente, y combinar el codificador preentrenado con una pérdida más orientada a la sensibilidad y con contexto entre cortes adyacentes (2.5D o 3D).
+\end{enumerate}
+
+\subsection{Conclusiones}\label{subsec:conclusiones}
+
+Este trabajo ha abordado la segmentación multiclase de tumores cerebrales en RM como un problema de optimización en dos niveles, con el mismo peso para el entrenamiento de la red y para la metaoptimización de sus hiperparámetros. Sus conclusiones principales son las siguientes:
+
+\begin{enumerate}
+  \item \textbf{El entrenamiento de la U-Net puede razonarse como un problema de optimización.} El papel de $\alpha$ y $\beta$ en la pérdida Focal Tversky permitió corregir de forma dirigida el desequilibrio entre falsos negativos y falsos positivos del glioma.
+  \item \textbf{El algoritmo genético es la palanca más eficaz del proyecto.} Con 46 evaluaciones de bajo coste, mejoró la precisión y la velocidad de convergencia de la configuración manual y explica casi dos tercios de la mejora total.
+  \item \textbf{Una solución heurística debe analizarse críticamente.} Corregir el sesgo de horizonte corto de la aptitud, conservando los valores de $\eta$ y $\lambda$ del AG, elevó el modelo entrenado desde cero hasta un Dice medio de 0.8175 en prueba.
+  \item \textbf{La dinámica del descenso importa tanto como los valores de los hiperparámetros.} El \textit{cosine annealing} eliminó la oscilación del Dice de validación y convirtió la selección del modelo en una decisión fiable.
+  \item \textbf{La transferencia de aprendizaje es un complemento, no un sustituto.} Un codificador preentrenado converge mucho más rápido y distingue mejor los tipos tumorales, pero no mejora el resultado medio ni la delimitación del glioma.
+\end{enumerate}
+
+Como resultado aplicado, el proyecto incluye una interfaz web en Streamlit que muestra en tiempo real la máscara predicha por el modelo base, y los modelos E y F sobre un corte de RM, con carácter demostrativo y sin finalidad clínica. Se puede acceder a la interfaz a través de la siguiente dirección URL: \url{https://unet-tumor-segmentation-jruano-adelgado.streamlit.app/}.

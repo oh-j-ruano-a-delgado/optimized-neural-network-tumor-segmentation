@@ -216,3 +216,20 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Kaggle API credentials
+kaggle.json
+
+# Ignore all content inside data/ but allow subdirectories and .gitkeep files
+data/**/*
+!data/**/
+!data/**/.gitkeep
+
+
+# Documents to help AI agent
+agents.md
+bases-proyecto-optimizacionyheuristica.md
+project_guidelines.md
+
+# Training artifacts (checkpoints and experiment logs)
+runs/
